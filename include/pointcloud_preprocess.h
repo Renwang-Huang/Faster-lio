@@ -1,9 +1,22 @@
 #ifndef FASTER_LIO_POINTCLOUD_PROCESSING_H
 #define FASTER_LIO_POINTCLOUD_PROCESSING_H
 
-#include <livox_ros_driver/CustomMsg.h>
-#include <pcl_conversions/pcl_conversions.h>
 
+#ifdef ROS2
+    #include <livox_ros_driver2/msg/custom_msg.hpp>
+    #include <sensor_msgs/msg/point_cloud2.hpp>
+    
+    using LivoxMsgConstPtr = livox_ros_driver2::msg::CustomMsg::ConstSharedPtr;
+    using PointCloud2ConstPtr = sensor_msgs::msg::PointCloud2::ConstSharedPtr;
+#else
+    #include <livox_ros_driver/CustomMsg.h>
+    #include <sensor_msgs/PointCloud2.h>
+    
+    using LivoxMsgConstPtr = livox_ros_driver::CustomMsg::ConstPtr;
+    using PointCloud2ConstPtr = sensor_msgs::PointCloud2::ConstPtr;
+#endif
+
+#include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <cstdint>
@@ -140,8 +153,8 @@ class PointCloudPreprocess {
     ~PointCloudPreprocess() = default;
 
     /// processors
-    void Process(const livox_ros_driver::CustomMsg::ConstPtr &msg, PointCloudType::Ptr &pcl_out);
-    void Process(const sensor_msgs::PointCloud2::ConstPtr &msg, PointCloudType::Ptr &pcl_out);
+    void Process(const LivoxMsgConstPtr &msg, PointCloudType::Ptr &pcl_out);
+    void Process(const PointCloud2ConstPtr &msg, PointCloudType::Ptr &pcl_out);
     void Set(LidarType lid_type, double bld, int pfilt_num);
 
     // accessors
@@ -154,11 +167,11 @@ class PointCloudPreprocess {
     void SetLidarType(LidarType lt) { lidar_type_ = lt; }
 
    private:
-    void AviaHandler(const livox_ros_driver::CustomMsg::ConstPtr &msg);
-    void Oust64Handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
-    void VelodyneHandler(const sensor_msgs::PointCloud2::ConstPtr &msg);
-    void HesaiHandler(const sensor_msgs::PointCloud2::ConstPtr &msg);
-    void LivoxHandler(const sensor_msgs::PointCloud2::ConstPtr &msg);
+    void AviaHandler(const LivoxMsgConstPtr &msg);
+    void Oust64Handler(const PointCloud2ConstPtr &msg);
+    void VelodyneHandler(const PointCloud2ConstPtr &msg);
+    void HesaiHandler(const PointCloud2ConstPtr &msg);
+    void LivoxHandler(const PointCloud2ConstPtr &msg);
 
     PointCloudType cloud_full_, cloud_out_;
 

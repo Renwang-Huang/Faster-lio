@@ -1,51 +1,59 @@
-//
-// Created by xiang on 2021/10/8.
-//
-#include <gflags/gflags.h>
 #include <unistd.h>
 #include <csignal>
+#include <vector>
+#include <string>
+#include <rclcpp/rclcpp.hpp>
 
 #include "laser_mapping.h"
+#include "utils.h"
 
-/// run the lidar mapping in online mode
-
-DEFINE_string(traj_log_file, "./Log/traj.txt", "path to traj log file");
 void SigHandle(int sig) {
     faster_lio::options::FLAG_EXIT = true;
-    ROS_WARN("catch sig %d", sig);
+    RCLCPP_WARN(rclcpp::get_logger("faster_lio"), "Catch signal %d, exiting...", sig);
 }
 
 int main(int argc, char **argv) {
-    FLAGS_stderrthreshold = google::INFO;
-    FLAGS_colorlogtostderr = true;
-    google::InitGoogleLogging(argv[0]);
-    google::ParseCommandLineFlags(&argc, &argv, true);
+    rclcpp::init(argc, argv);
 
-    ros::init(argc, argv, "faster_lio");
-    ros::NodeHandle nh;
+    auto node = std::make_shared<rclcpp::Node>("faster_lio");
+
+    node->declare_parameter<std::string>("traj_log_file", "./Log/traj.txt");
+    std::string traj_log_file = node->get_parameter("traj_log_file").as_string();
 
     auto laser_mapping = std::make_shared<faster_lio::LaserMapping>();
-    laser_mapping->InitROS(nh);
+    if (!laser_mapping->InitROS(node)) {
+        RCLCPP_ERROR(node->get_logger(), "Laser mapping init failed!");
+        rclcpp::shutdown();
+        return -1;
+    }
 
     signal(SIGINT, SigHandle);
-    ros::Rate rate(5000);
 
-    // online, almost same with offline, just receive the messages from ros
-    while (ros::ok()) {
+    RCLCPP_INFO(node->get_logger(), "Faster-LIO Online Node Started.");
+
+    rclcpp::Rate rate(5000);
+
+    while (rclcpp::ok()) {
         if (faster_lio::options::FLAG_EXIT) {
             break;
         }
-        ros::spinOnce();
+
+        rclcpp::spin_some(node);
+
         laser_mapping->Run();
+
         rate.sleep();
     }
 
-    LOG(INFO) << "finishing mapping";
+    RCLCPP_INFO(node->get_logger(), "Finishing mapping...");
     laser_mapping->Finish();
 
     faster_lio::Timer::PrintAll();
-    LOG(INFO) << "save trajectory to: " << FLAGS_traj_log_file;
-    laser_mapping->Savetrajectory(FLAGS_traj_log_file);
+
+    RCLCPP_INFO(node->get_logger(), "Save trajectory to: %s", traj_log_file.c_str());
+    laser_mapping->Savetrajectory(traj_log_file);
+
+    rclcpp::shutdown();
 
     return 0;
 }

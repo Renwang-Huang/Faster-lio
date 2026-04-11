@@ -1,7 +1,3 @@
-//
-// Created by xiang on 2021/10/11.
-//
-
 #ifndef FASTER_LIO_UTILS_H
 #define FASTER_LIO_UTILS_H
 

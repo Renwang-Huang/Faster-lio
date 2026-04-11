@@ -4,10 +4,11 @@
 #include <deque>
 #include <vector>
 #include <string>
+#include <array> 
 
-#include <eigen_conversions/eigen_msg.h>
-#include <nav_msgs/Odometry.h>
-#include <sensor_msgs/Imu.h>
+#include <tf2_eigen/tf2_eigen.hpp>
+#include <nav_msgs/msg/odometry.hpp>
+#include <sensor_msgs/msg/imu.hpp>
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -17,7 +18,7 @@
 #include <boost/array.hpp>
 #include <unsupported/Eigen/ArpackSupport>
 
-#include "faster_lio/Pose6D.h"
+#include "faster_lio/msg/pose6_d.hpp"
 #include "options.h"
 #include "so3_math.h"
 
@@ -41,6 +42,11 @@ inline Eigen::Matrix<S, 3, 1> VecFromArray(const boost::array<S, 3> &v) {
 }
 
 template <typename S>
+inline Eigen::Matrix<S, 3, 1> VecFromArray(const std::array<S, 3> &v) {
+    return Eigen::Matrix<S, 3, 1>(v[0], v[1], v[2]);
+}
+
+template <typename S>
 inline Eigen::Matrix<S, 3, 3> MatFromArray(const std::vector<double> &v) {
     Eigen::Matrix<S, 3, 3> m;
     m << v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8];
@@ -54,9 +60,16 @@ inline Eigen::Matrix<S, 3, 3> MatFromArray(const boost::array<S, 9> &v) {
     return m;
 }
 
+template <typename S>
+inline Eigen::Matrix<S, 3, 3> MatFromArray(const std::array<S, 9> &v) {
+    Eigen::Matrix<S, 3, 3> m;
+    m << v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8];
+    return m;
+}
+
 inline std::string DEBUG_FILE_DIR(const std::string &name) { return std::string(ROOT_DIR) + "Log/" + name; }
 
-using Pose6D = faster_lio::Pose6D;
+using Pose6D = faster_lio::msg::Pose6D;
 using V3D = Eigen::Vector3d;
 using V4D = Eigen::Vector4d;
 using V5D = Eigen::Matrix<double, 5, 1>;
@@ -87,7 +100,7 @@ struct MeasureGroup {
     double lidar_bag_time_ = 0;
     double lidar_end_time_ = 0;
     PointCloudType::Ptr lidar_ = nullptr;
-    std::deque<sensor_msgs::Imu::ConstPtr> imu_;
+    std::deque<sensor_msgs::msg::Imu::SharedPtr> imu_;
 };
 
 template <typename T>
@@ -102,14 +115,6 @@ T deg2rad(const T &degrees) {
 
 /**
  * set a pose 6d from ekf status
- * @tparam T
- * @param t
- * @param a
- * @param g
- * @param v
- * @param p
- * @param R
- * @return
  */
 template <typename T>
 Pose6D set_pose6d(const double t, const Eigen::Matrix<T, 3, 1> &a, const Eigen::Matrix<T, 3, 1> &g,
@@ -126,22 +131,6 @@ Pose6D set_pose6d(const double t, const Eigen::Matrix<T, 3, 1> &a, const Eigen::
     return rot_kp;
 }
 
-/* comment
-plane equation: Ax + By + Cz + D = 0
-convert to: A/D*x + B/D*y + C/D*z = -1
-solve: A0*x0 = b0
-where A0_i = [x_i, y_i, z_i], x0 = [A/D, B/D, C/D]^T, b0 = [-1, ..., -1]^T
-normvec_:  normalized x0
-*/
-/**
- * 计算一组点的法线
- * @tparam T
- * @param normvec
- * @param point
- * @param threshold
- * @param point_num
- * @return
- */
 template <typename T>
 bool esti_normvector(Eigen::Matrix<T, 3, 1> &normvec, const PointVector &point, const T &threshold,
                      const int &point_num) {
@@ -167,12 +156,6 @@ bool esti_normvector(Eigen::Matrix<T, 3, 1> &normvec, const PointVector &point, 
     return true;
 }
 
-/**
- * squared distance
- * @param p1
- * @param p2
- * @return
- */
 inline float calc_dist(const PointType &p1, const PointType &p2) {
     return (p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y) + (p1.z - p2.z) * (p1.z - p2.z);
 }
@@ -181,11 +164,6 @@ inline float calc_dist(const Eigen::Vector3f &p1, const Eigen::Vector3f &p2) { r
 
 /**
  * estimate a plane
- * @tparam T
- * @param pca_result
- * @param point
- * @param threshold
- * @return
  */
 template <typename T>
 inline bool esti_plane(Eigen::Matrix<T, 4, 1> &pca_result, const PointVector &point, const T &threshold = 0.1f) {
