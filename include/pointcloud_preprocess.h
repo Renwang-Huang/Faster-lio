@@ -1,46 +1,68 @@
 #ifndef FASTER_LIO_POINTCLOUD_PROCESSING_H
 #define FASTER_LIO_POINTCLOUD_PROCESSING_H
 
-#include <livox_ros_driver2/msg/custom_msg.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
-    
-using LivoxMsgConstPtr = livox_ros_driver2::msg::CustomMsg::ConstSharedPtr;
-using PointCloud2ConstPtr = sensor_msgs::msg::PointCloud2::ConstSharedPtr;
+#include <livox_ros_driver2/msg/custom_msg.hpp>
 
 #include <pcl_conversions/pcl_conversions.h>
+
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
-#include <cstdint>
 
 #include "common_lib.h"
 
-namespace livox_ros {
+namespace velodyne_ros {
 struct EIGEN_ALIGN16 Point {
     PCL_ADD_POINT4D;
     float intensity;
-    uint8_t tag;
-    uint8_t line;
-    double timestamp;
+    float time;
+    std::uint16_t ring;
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
-}  // namespace livox_ros
+}  // namespace velodyne_ros
 
 // clang-format off
-POINT_CLOUD_REGISTER_POINT_STRUCT(livox_ros::Point,
-                                (float, x, x)
-                                (float, y, y)
-                                (float, z, z)
-                                (float, intensity, intensity)
-                                (std::uint8_t, tag, tag)
-                                (std::uint8_t, line, line)
-                                (double, timestamp, timestamp)
-)
+POINT_CLOUD_REGISTER_POINT_STRUCT(velodyne_ros::Point,
+                                  (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)
+                                      (float, time, time)(std::uint16_t, ring, ring))
+// clang-format on
+
+namespace ouster_ros {
+struct EIGEN_ALIGN16 Point {
+    PCL_ADD_POINT4D;
+    float intensity;
+    uint32_t t;
+    uint16_t reflectivity;
+    uint8_t ring;
+    uint16_t ambient;
+    uint32_t range;
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+};
+}  // namespace ouster_ros
+
+// clang-format off
+POINT_CLOUD_REGISTER_POINT_STRUCT(ouster_ros::Point,
+                                  (float, x, x)
+                                      (float, y, y)
+                                      (float, z, z)
+                                      (float, intensity, intensity)
+                                      // use std::uint32_t to avoid conflicting with pcl::uint32_t
+                                  (std::uint32_t, t, t)
+                                  (std::uint16_t, reflectivity, reflectivity)
+                                  (std::uint8_t, ring, ring)
+                                  (std::uint16_t, ambient, ambient)
+                                  (std::uint32_t, range, range)
+                                  )
 // clang-format on
 
 namespace faster_lio {
 
-enum class LidarType { AVIA = 1, LIVOX };
+enum class LidarType { MID360 = 1, VELO32, OUST64 };
 
+/**
+ * point cloud preprocess
+ * just unify the point format from livox/velodyne to PCL
+ */
 class PointCloudPreprocess {
    public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -48,9 +70,8 @@ class PointCloudPreprocess {
     PointCloudPreprocess() = default;
     ~PointCloudPreprocess() = default;
 
-    /// processors
-    void Process(const LivoxMsgConstPtr &msg, PointCloudType::Ptr &pcl_out);
-    void Process(const PointCloud2ConstPtr &msg, PointCloudType::Ptr &pcl_out);
+    void Process(const livox_ros_driver2::msg::CustomMsg::ConstSharedPtr &msg, PointCloudType::Ptr &pcl_out);
+    void Process(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg, PointCloudType::Ptr &pcl_out);
     void Set(LidarType lid_type, double bld, int pfilt_num);
 
     // accessors
@@ -63,12 +84,13 @@ class PointCloudPreprocess {
     void SetLidarType(LidarType lt) { lidar_type_ = lt; }
 
    private:
-    void AviaHandler(const LivoxMsgConstPtr &msg);
-    void LivoxHandler(const PointCloud2ConstPtr &msg);
+    void Mid360Handler(const livox_ros_driver2::msg::CustomMsg::ConstSharedPtr &msg);
+    void Oust64Handler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
+    void VelodyneHandler(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
 
     PointCloudType cloud_full_, cloud_out_;
 
-    LidarType lidar_type_ = LidarType::AVIA;
+    LidarType lidar_type_ = LidarType::MID360;
     bool feature_enabled_ = false;
     int point_filter_num_ = 1;
     int num_scans_ = 6;
