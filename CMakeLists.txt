@@ -26,6 +26,8 @@ find_package(rosbag2_storage REQUIRED)
 find_package(gflags REQUIRED)
 find_package(glog REQUIRED)
 
+find_package(livox_ros_driver2 REQUIRED)
+
 include(cmake/packages.cmake)
 
 add_definitions(-DROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/")
@@ -85,7 +87,7 @@ target_link_libraries(run_mapping_online
 )
 
 install(DIRECTORY include/ DESTINATION include FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
-install(DIRECTORY cmake config launch rviz DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY cmake config launch DESTINATION share/${PROJECT_NAME})
 
 install(TARGETS ${LIBRARY_TARGET_NAME}
     EXPORT export_${LIBRARY_TARGET_NAME}
