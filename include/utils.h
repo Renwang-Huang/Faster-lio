@@ -1,3 +1,7 @@
+//
+// Created by xiang on 2021/10/11.
+//
+
 #ifndef FASTER_LIO_UTILS_H
 #define FASTER_LIO_UTILS_H
 
@@ -53,6 +57,12 @@ class Timer {
                       << " ms , called times: " << r.second.time_usage_in_ms_.size();
         }
         LOG(INFO) << ">>> ===== Printing run time end =====";
+    }
+
+    static void ClearAll() {
+        for (auto& r : records_) {
+            r.second.time_usage_in_ms_.clear();
+        }
     }
 
     /// dump to a log file
