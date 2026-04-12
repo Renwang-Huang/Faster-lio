@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.8) 
 project(faster_lio)
 
-add_definitions(-DBOOST_BIND_GLOBAL_PLACEHOLDERS)
-
-cmake_policy(SET CMP0074 NEW)
-
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  set(CMAKE_BUILD_TYPE "Release")
+if(POLICY CMP0074)
+  cmake_policy(SET CMP0074 NEW)
 endif()
+
+add_compile_definitions(BOOST_BIND_GLOBAL_PLACEHOLDERS)
+
+set(DEFAULT_BUILD_TYPE "Release")
 
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
@@ -19,46 +19,94 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread -fexceptions -g -ggdb")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 ${CMAKE_CXX_FLAGS}")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS}")
 
-add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
-
-add_compile_definitions(ROS2)
-
 find_package(ament_cmake REQUIRED)
+find_package(rosbag2_cpp REQUIRED)
+find_package(rosbag2_storage REQUIRED)
 
-find_package(rclcpp REQUIRED)
-find_package(sensor_msgs REQUIRED)
-find_package(nav_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(tf2 REQUIRED)
-find_package(tf2_ros REQUIRED)
-find_package(tf2_eigen REQUIRED)
-find_package(pcl_conversions REQUIRED)
+find_package(gflags REQUIRED)
+find_package(glog REQUIRED)
+
 find_package(livox_ros_driver2 REQUIRED)
-find_package(rosidl_default_generators REQUIRED)
 
-find_package(PCL REQUIRED)
-find_package(Glog REQUIRED)
-find_package(yaml-cpp REQUIRED)
-find_package(Eigen3 REQUIRED)
+include(cmake/packages.cmake)
 
-rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/Pose6D.msg"
-  DEPENDENCIES geometry_msgs
-)
+add_definitions(-DROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/")
 
 option(WITH_IVOX_NODE_TYPE_PHC "Use PHC instead of default ivox node" OFF)
 if (WITH_IVOX_NODE_TYPE_PHC)
-    message(STATUS "USING_IVOX_NODE_TYPE_PHC")
     add_definitions(-DIVOX_NODE_TYPE_PHC)
-else ()
-    message(STATUS "USING_IVOX_NODE_TYPE_DEFAULT")
 endif()
 
-add_subdirectory(src)
-add_subdirectory(app)
+set(LIBRARY_TARGET_NAME ${PROJECT_NAME}_lib)
 
-install(DIRECTORY launch config
-        DESTINATION share/${PROJECT_NAME}
+add_library(${LIBRARY_TARGET_NAME} SHARED
+        src/laser_mapping.cc
+        src/pointcloud_preprocess.cc
+        src/options.cc
+        src/utils.cc
+        )
+
+ament_target_dependencies(${LIBRARY_TARGET_NAME}
+        rclcpp
+        geometry_msgs
+        nav_msgs
+        sensor_msgs
+        std_msgs
+        tf2
+        tf2_ros
+        tf2_geometry_msgs
+        tf2_eigen
+        pcl_conversions
+        livox_ros_driver2
+        )
+
+rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
+
+target_link_libraries(${LIBRARY_TARGET_NAME}
+        ${PCL_LIBRARIES}
+        gflags
+        glog
+        tbb
+        yaml-cpp
+        "${cpp_typesupport_target}"
+        )
+
+add_executable(run_mapping_online app/run_mapping_online.cc)
+ament_target_dependencies(run_mapping_online
+    rclcpp
+    geometry_msgs
+    nav_msgs
+    sensor_msgs
+    livox_ros_driver2
 )
+target_link_libraries(run_mapping_online
+    ${LIBRARY_TARGET_NAME}
+    gflags
+    glog
+    ${PCL_LIBRARIES}
+)
+
+install(DIRECTORY include/ DESTINATION include FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+install(DIRECTORY cmake config launch DESTINATION share/${PROJECT_NAME})
+
+install(TARGETS ${LIBRARY_TARGET_NAME}
+    EXPORT export_${LIBRARY_TARGET_NAME}
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
+)
+
+install(TARGETS 
+    run_mapping_online 
+    DESTINATION lib/${PROJECT_NAME}
+)
+
+ament_export_include_directories(include)
+ament_export_libraries(${LIBRARY_TARGET_NAME})
+ament_export_dependencies(
+    rclcpp geometry_msgs nav_msgs sensor_msgs std_msgs
+    tf2 tf2_ros tf2_eigen tf2_geometry_msgs
+    pcl_conversions livox_ros_driver2 rosbag2_cpp
+) 
 
 ament_package()
