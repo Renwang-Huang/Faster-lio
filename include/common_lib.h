@@ -2,9 +2,9 @@
 #define COMMON_LIB_H
 
 #include <deque>
+#include <array>
 #include <vector>
 #include <string>
-#include <array> 
 
 #include <tf2_eigen/tf2_eigen.hpp>
 #include <nav_msgs/msg/odometry.hpp>
@@ -18,7 +18,7 @@
 #include <boost/array.hpp>
 #include <unsupported/Eigen/ArpackSupport>
 
-#include "faster_lio/msg/pose6_d.hpp"
+#include <faster_lio/msg/pose6_d.hpp>
 #include "options.h"
 #include "so3_math.h"
 
@@ -29,10 +29,10 @@ using PointVector = std::vector<PointType, Eigen::aligned_allocator<PointType>>;
 
 namespace faster_lio::common {
 
-constexpr double G_m_s2 = 9.81;  // Gravity const in GuangDong/China
+constexpr double G_m_s2 = 9.81; 
 
 template <typename S>
-inline Eigen::Matrix<S, 3, 1> VecFromArray(const std::vector<double> &v) {
+inline Eigen::Matrix<S, 3, 1> VecFromArray(const std::vector<S> &v) {
     return Eigen::Matrix<S, 3, 1>(v[0], v[1], v[2]);
 }
 
@@ -41,13 +41,14 @@ inline Eigen::Matrix<S, 3, 1> VecFromArray(const boost::array<S, 3> &v) {
     return Eigen::Matrix<S, 3, 1>(v[0], v[1], v[2]);
 }
 
-template <typename S>
-inline Eigen::Matrix<S, 3, 1> VecFromArray(const std::array<S, 3> &v) {
+template <typename S, std::size_t N>
+inline Eigen::Matrix<S, 3, 1> VecFromArray(const std::array<S, N> &v) {
+    static_assert(N >= 3, "Array size must be at least 3 for Vec3");
     return Eigen::Matrix<S, 3, 1>(v[0], v[1], v[2]);
 }
 
 template <typename S>
-inline Eigen::Matrix<S, 3, 3> MatFromArray(const std::vector<double> &v) {
+inline Eigen::Matrix<S, 3, 3> MatFromArray(const std::vector<S> &v) {
     Eigen::Matrix<S, 3, 3> m;
     m << v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8];
     return m;
@@ -60,14 +61,19 @@ inline Eigen::Matrix<S, 3, 3> MatFromArray(const boost::array<S, 9> &v) {
     return m;
 }
 
-template <typename S>
-inline Eigen::Matrix<S, 3, 3> MatFromArray(const std::array<S, 9> &v) {
+template <typename S, std::size_t N>
+inline Eigen::Matrix<S, 3, 3> MatFromArray(const std::array<S, N> &v) {
+    static_assert(N >= 9, "Array size must be at least 9 for Mat3x3");
     Eigen::Matrix<S, 3, 3> m;
     m << v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8];
     return m;
 }
 
-inline std::string DEBUG_FILE_DIR(const std::string &name) { return std::string(ROOT_DIR) + "Log/" + name; }
+// =========================================================================================
+
+inline std::string DEBUG_FILE_DIR(const std::string &name) { 
+    return std::string(ROOT_DIR) + "Log/" + name; 
+}
 
 using Pose6D = faster_lio::msg::Pose6D;
 using V3D = Eigen::Vector3d;
@@ -93,29 +99,21 @@ const M3F Eye3f = M3F::Identity();
 const V3D Zero3d(0, 0, 0);
 const V3F Zero3f(0, 0, 0);
 
-/// sync imu and lidar measurements
 struct MeasureGroup {
     MeasureGroup() { this->lidar_.reset(new PointCloudType()); };
 
     double lidar_bag_time_ = 0;
     double lidar_end_time_ = 0;
     PointCloudType::Ptr lidar_ = nullptr;
-    std::deque<sensor_msgs::msg::Imu::SharedPtr> imu_;
+    std::deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu_;
 };
 
 template <typename T>
-T rad2deg(const T &radians) {
-    return radians * 180.0 / M_PI;
-}
+T rad2deg(const T &radians) { return radians * 180.0 / M_PI; }
 
 template <typename T>
-T deg2rad(const T &degrees) {
-    return degrees * M_PI / 180.0;
-}
+T deg2rad(const T &degrees) { return degrees * M_PI / 180.0; }
 
-/**
- * set a pose 6d from ekf status
- */
 template <typename T>
 Pose6D set_pose6d(const double t, const Eigen::Matrix<T, 3, 1> &a, const Eigen::Matrix<T, 3, 1> &g,
                   const Eigen::Matrix<T, 3, 1> &v, const Eigen::Matrix<T, 3, 1> &p, const Eigen::Matrix<T, 3, 3> &R) {
@@ -162,9 +160,6 @@ inline float calc_dist(const PointType &p1, const PointType &p2) {
 
 inline float calc_dist(const Eigen::Vector3f &p1, const Eigen::Vector3f &p2) { return (p1 - p2).squaredNorm(); }
 
-/**
- * estimate a plane
- */
 template <typename T>
 inline bool esti_plane(Eigen::Matrix<T, 4, 1> &pca_result, const PointVector &point, const T &threshold = 0.1f) {
     if (point.size() < options::MIN_NUM_MATCH_POINTS) {
@@ -208,14 +203,14 @@ inline bool esti_plane(Eigen::Matrix<T, 4, 1> &pca_result, const PointVector &po
         normvec(2, 0) = n(2, 0);
     }
 
-    T n = normvec.norm();
-    pca_result(0) = normvec(0) / n;
-    pca_result(1) = normvec(1) / n;
-    pca_result(2) = normvec(2) / n;
-    pca_result(3) = 1.0 / n;
+    T n_norm = normvec.norm();
+    pca_result(0) = normvec(0) / n_norm;
+    pca_result(1) = normvec(1) / n_norm;
+    pca_result(2) = normvec(2) / n_norm;
+    pca_result(3) = 1.0 / n_norm;
 
     for (const auto &p : point) {
-        Eigen::Matrix<T, 4, 1> temp = p.getVector4fMap();
+        Eigen::Matrix<T, 4, 1> temp = p.getVector4fMap().template cast<T>();
         temp[3] = 1.0;
         if (fabs(pca_result.dot(temp)) > threshold) {
             return false;
