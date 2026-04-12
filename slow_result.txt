@@ -1,0 +1,13 @@
+
+set(DEFAULT_BUILD_TYPE "Release")
+
+[run_mapping_online-1] I0413 00:11:21.703083 606297 utils.h:52] >>> ===== Printing run time =====
+[run_mapping_online-1] I0413 00:11:21.703096 606297 utils.h:54] > [ IVox Add Points ] average time usage: 0.16935 ms , called times: 51
+[run_mapping_online-1] I0413 00:11:21.703121 606297 utils.h:54] > [ Incremental Mapping ] average time usage: 10.6569 ms , called times: 51
+[run_mapping_online-1] I0413 00:11:21.703125 606297 utils.h:54] > [ ObsModel (IEKF Build Jacobian) ] average time usage: 1.66217 ms , called times: 164
+[run_mapping_online-1] I0413 00:11:21.703130 606297 utils.h:54] > [ ObsModel (Lidar Match) ] average time usage: 52.9856 ms , called times: 164
+[run_mapping_online-1] I0413 00:11:21.703135 606297 utils.h:54] > [ Downsample PointCloud ] average time usage: 0.155576 ms , called times: 51
+[run_mapping_online-1] I0413 00:11:21.703138 606297 utils.h:54] > [ IEKF Solve and Update ] average time usage: 203.326 ms , called times: 51
+[run_mapping_online-1] I0413 00:11:21.703142 606297 utils.h:54] > [ Preprocess (Livox) ] average time usage: 24.2139 ms , called times: 89
+[run_mapping_online-1] I0413 00:11:21.703146 606297 utils.h:54] > [ Undistort Pcl ] average time usage: 63.3622 ms , called times: 26
+[run_mapping_online-1] I0413 00:11:21.703150 606297 utils.h:59] >>> ===== Printing run time end =====

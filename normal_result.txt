@@ -1,0 +1,15 @@
+
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE "Release")
+endif()
+
+[run_mapping_online-1] I0413 00:08:59.345141 604451 utils.h:52] >>> ===== Printing run time =====
+[run_mapping_online-1] I0413 00:08:59.345151 604451 utils.h:54] > [ IVox Add Points ] average time usage: 0.0305084 ms , called times: 282
+[run_mapping_online-1] I0413 00:08:59.345170 604451 utils.h:54] > [ Incremental Mapping ] average time usage: 0.133102 ms , called times: 282
+[run_mapping_online-1] I0413 00:08:59.345172 604451 utils.h:54] > [ ObsModel (IEKF Build Jacobian) ] average time usage: 0.0433159 ms , called times: 1101
+[run_mapping_online-1] I0413 00:08:59.345177 604451 utils.h:54] > [ ObsModel (Lidar Match) ] average time usage: 5.08098 ms , called times: 1101
+[run_mapping_online-1] I0413 00:08:59.345182 604451 utils.h:54] > [ Downsample PointCloud ] average time usage: 0.156536 ms , called times: 282
+[run_mapping_online-1] I0413 00:08:59.345187 604451 utils.h:54] > [ IEKF Solve and Update ] average time usage: 20.7088 ms , called times: 282
+[run_mapping_online-1] I0413 00:08:59.345191 604451 utils.h:54] > [ Preprocess (Livox) ] average time usage: 0.314791 ms , called times: 284
+[run_mapping_online-1] I0413 00:08:59.345196 604451 utils.h:54] > [ Undistort Pcl ] average time usage: 0.643876 ms , called times: 283
+[run_mapping_online-1] I0413 00:08:59.345199 604451 utils.h:59] >>> ===== Printing run time end =====
