@@ -28,13 +28,10 @@ class LaserMapping {
    public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
 
-#ifdef IVOX_NODE_TYPE_PHC
-    using IVoxType = IVox<3, IVoxNodeType::PHC, PointType>;
-#else
     using IVoxType = IVox<3, IVoxNodeType::DEFAULT, PointType>;
-#endif
 
     LaserMapping();
+
     ~LaserMapping() {
         scan_down_body_ = nullptr;
         scan_undistort_ = nullptr;
@@ -42,16 +39,12 @@ class LaserMapping {
         LOG(INFO) << "laser mapping deconstruct";
     }
 
-    /// init with ros 2
+    /// init with ros2
     bool InitROS(rclcpp::Node::SharedPtr node);
-
-    /// init without ros
-    bool InitWithoutROS(const std::string &config_yaml);
 
     void Run();
 
     // callbacks of lidar and imu
-    void StandardPCLCallBack(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
     void LivoxPCLCallBack(const livox_ros_driver2::msg::CustomMsg::ConstSharedPtr msg);
     void IMUCallBack(const sensor_msgs::msg::Imu::ConstSharedPtr msg_in);
 
@@ -67,9 +60,6 @@ class LaserMapping {
     void PublishFrameWorld();
     void PublishFrameBody(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr &pub_laser_cloud_body);
     void PublishFrameEffectWorld(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr &pub_laser_cloud_effect_world);
-    void Savetrajectory(const std::string &traj_file);
-
-    void Finish();
 
    private:
     template <typename T>
@@ -84,16 +74,13 @@ class LaserMapping {
     void SubAndPubToROS(rclcpp::Node::SharedPtr node);
 
     bool LoadParams(rclcpp::Node::SharedPtr node);
-    bool LoadParamsFromYAML(const std::string &yaml);
-
-    void PrintState(const state_ikfom &s);
 
    private:
-    /// ROS 2 Core Modules
+    // ROS 2 Core Modules
     rclcpp::Node::SharedPtr node_;
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
-    /// modules
+    // modules
     IVoxType::Options ivox_options_;
     std::shared_ptr<IVoxType> ivox_ = nullptr;                    // localmap in ivox
     std::shared_ptr<PointCloudPreprocess> preprocess_ = nullptr;  // point cloud preprocess
@@ -122,7 +109,7 @@ class LaserMapping {
     std::vector<char> point_selected_surf_;           // selected points
     common::VV4F plane_coef_;                         // plane coeffs
 
-    /// ros 2 pub and sub stuffs
+    /// ros2 pub and sub stuffs
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_pcl_std_;
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr sub_pcl_livox_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
@@ -161,7 +148,7 @@ class LaserMapping {
     double lidar_mean_scantime_ = 0.0;
     int scan_num_ = 0;
     bool timediff_set_flg_ = false;
-    int effect_feat_num_ = 0, frame_num_ = 0;
+    int effect_feat_num_ = 0;
 
     ///////////////////////// EKF inputs and output ///////////////////////////////////////////////////////
     common::MeasureGroup measures_;                    // sync IMU and lidar scan
@@ -181,7 +168,6 @@ class LaserMapping {
     bool pcd_save_en_ = false;
     bool runtime_pos_log_ = true;
     int pcd_save_interval_ = -1;
-    bool path_save_en_ = false;
     std::string dataset_;
 
     PointCloudType::Ptr pcl_wait_save_{new PointCloudType()};  // debug save

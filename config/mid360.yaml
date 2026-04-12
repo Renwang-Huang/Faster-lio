@@ -1,4 +1,3 @@
-# 这里的名称必须与 Launch 文件中的 name='laserMapping' 一致
 /laserMapping:
   ros__parameters:
     common:
@@ -16,7 +15,7 @@
       gyr_cov: 0.1
       b_acc_cov: 0.0001
       b_gyr_cov: 0.0001
-      fov_degree: 360.0 # 建议写成浮点数
+      fov_degree: 360.0 
       det_range: 100.0
       extrinsic_est_en: false
       extrinsic_T: [-0.011, -0.02329, 0.04412]
@@ -28,10 +27,6 @@
       dense_publish_en: false
       scan_bodyframe_pub_en: false
 
-    pcd_save:
-      pcd_save_en: true
-      interval: -1 
-
     feature_extract_enable: false
     point_filter_num: 1
     max_iteration: 3
@@ -42,3 +37,4 @@
     ivox_grid_resolution: 0.1
     ivox_nearby_type: 18
     esti_plane_threshold: 0.1
+    

@@ -1,20 +1,11 @@
 #ifndef FASTER_LIO_POINTCLOUD_PROCESSING_H
 #define FASTER_LIO_POINTCLOUD_PROCESSING_H
 
-
-#ifdef ROS2
-    #include <livox_ros_driver2/msg/custom_msg.hpp>
-    #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <livox_ros_driver2/msg/custom_msg.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
     
-    using LivoxMsgConstPtr = livox_ros_driver2::msg::CustomMsg::ConstSharedPtr;
-    using PointCloud2ConstPtr = sensor_msgs::msg::PointCloud2::ConstSharedPtr;
-#else
-    #include <livox_ros_driver/CustomMsg.h>
-    #include <sensor_msgs/PointCloud2.h>
-    
-    using LivoxMsgConstPtr = livox_ros_driver::CustomMsg::ConstPtr;
-    using PointCloud2ConstPtr = sensor_msgs::PointCloud2::ConstPtr;
-#endif
+using LivoxMsgConstPtr = livox_ros_driver2::msg::CustomMsg::ConstSharedPtr;
+using PointCloud2ConstPtr = sensor_msgs::msg::PointCloud2::ConstSharedPtr;
 
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
@@ -22,97 +13,6 @@
 #include <cstdint>
 
 #include "common_lib.h"
-
-namespace velodyne_ros {
-struct EIGEN_ALIGN16 Point {
-    PCL_ADD_POINT4D;
-    float intensity;
-    float time;
-    std::uint16_t ring;
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-};
-}  // namespace velodyne_ros
-
-// clang-format off
-POINT_CLOUD_REGISTER_POINT_STRUCT(velodyne_ros::Point,
-                                (float, x, x)
-                                (float, y, y)
-                                (float, z, z)
-                                (float, intensity, intensity)
-                                (float, time, time)
-                                (std::uint16_t, ring, ring)
-)
-// clang-format on
-
-namespace ouster_ros {
-struct EIGEN_ALIGN16 Point {
-    PCL_ADD_POINT4D;
-    float intensity;
-    uint32_t t;
-    uint16_t reflectivity;
-    uint8_t ring;
-    uint16_t ambient;
-    uint32_t range;
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-};
-}  // namespace ouster_ros
-
-// clang-format off
-POINT_CLOUD_REGISTER_POINT_STRUCT(ouster_ros::Point,
-                                (float, x, x)
-                                (float, y, y)
-                                (float, z, z)
-                                (float, intensity, intensity)
-                                // use std::uint32_t to avoid conflicting with pcl::uint32_t
-                                (std::uint32_t, t, t)
-                                (std::uint16_t, reflectivity, reflectivity)
-                                (std::uint8_t, ring, ring)
-                                (std::uint16_t, ambient, ambient)
-                                (std::uint32_t, range, range)
-)
-// clang-format on
-
-namespace hesai_ros {
-struct EIGEN_ALIGN16 Point {
-    PCL_ADD_POINT4D;
-    float intensity;
-    double timestamp;
-    uint16_t ring;
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-};
-}  // namespace hesai_ros
-
-// clang-format off
-POINT_CLOUD_REGISTER_POINT_STRUCT(hesai_ros::Point,
-                                (float, x, x)
-                                (float, y, y)
-                                (float, z, z)
-                                (float, intensity, intensity)
-                                (double, timestamp, timestamp)
-                                (std::uint16_t, ring, ring)
-)
-// clang-format on
-
-namespace robosense_ros {
-struct EIGEN_ALIGN16 Point {
-    PCL_ADD_POINT4D;
-    float intensity;
-    uint16_t ring;
-    double timestamp;
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-};
-}  // namespace robosense_ros
-
-// clang-format off
-POINT_CLOUD_REGISTER_POINT_STRUCT(robosense_ros::Point,
-                                (float, x, x)
-                                (float, y, y)
-                                (float, z, z)
-                                (float, intensity, intensity)
-                                (std::uint16_t, ring, ring)
-                                (double, timestamp, timestamp)
-)
-// clang-format on
 
 namespace livox_ros {
 struct EIGEN_ALIGN16 Point {
@@ -139,12 +39,8 @@ POINT_CLOUD_REGISTER_POINT_STRUCT(livox_ros::Point,
 
 namespace faster_lio {
 
-enum class LidarType { AVIA = 1, VELO32, OUST64, HESAIxt32, ROBOSENSE, LIVOX };
+enum class LidarType { AVIA = 1, LIVOX };
 
-/**
- * point cloud preprocess
- * just unify the point format from livox/velodyne to PCL
- */
 class PointCloudPreprocess {
    public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -168,9 +64,6 @@ class PointCloudPreprocess {
 
    private:
     void AviaHandler(const LivoxMsgConstPtr &msg);
-    void Oust64Handler(const PointCloud2ConstPtr &msg);
-    void VelodyneHandler(const PointCloud2ConstPtr &msg);
-    void HesaiHandler(const PointCloud2ConstPtr &msg);
     void LivoxHandler(const PointCloud2ConstPtr &msg);
 
     PointCloudType cloud_full_, cloud_out_;

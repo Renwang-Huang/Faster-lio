@@ -31,45 +31,18 @@ bool LaserMapping::InitROS(rclcpp::Node::SharedPtr node) {
     return true;
 }
 
-bool LaserMapping::InitWithoutROS(const std::string &config_yaml) {
-    LOG(INFO) << "init laser mapping from " << config_yaml;
-    if (!LoadParamsFromYAML(config_yaml)) {
-        return false;
-    }
-
-    // localmap init (after LoadParams)
-    ivox_ = std::make_shared<IVoxType>(ivox_options_);
-
-    // esekf init
-    std::vector<double> epsi(23, 0.001);
-    kf_.init_dyn_share(
-        get_f, df_dx, df_dw,
-        [this](state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data) { ObsModel(s, ekfom_data); },
-        options::NUM_MAX_ITERATIONS, epsi.data());
-
-    if (std::is_same<IVoxType, IVox<3, IVoxNodeType::PHC, pcl::PointXYZI>>::value == true) {
-        LOG(INFO) << "using phc ivox";
-    } else if (std::is_same<IVoxType, IVox<3, IVoxNodeType::DEFAULT, pcl::PointXYZI>>::value == true) {
-        LOG(INFO) << "using default ivox";
-    }
-
-    return true;
-}
-
 bool LaserMapping::LoadParams(rclcpp::Node::SharedPtr node) {
-    // get params from param server
+    
     int lidar_type, ivox_nearby_type;
     double gyr_cov, acc_cov, b_gyr_cov, b_acc_cov;
     double filter_size_surf_min;
     common::V3D lidar_T_wrt_IMU;
     common::M3D lidar_R_wrt_IMU;
 
-    // Helper macro to declare and get parameters
     #define GET_PARAM(type, name, var, default_val) \
         node->declare_parameter<type>(name, default_val); \
         node->get_parameter(name, var);
 
-    GET_PARAM(bool, "path_save_en", path_save_en_, true);
     GET_PARAM(bool, "publish.path_publish_en", path_pub_en_, true);
     GET_PARAM(bool, "publish.scan_publish_en", scan_pub_en_, true);
     GET_PARAM(bool, "publish.dense_publish_en", dense_pub_en_, false);
@@ -98,7 +71,6 @@ bool LaserMapping::LoadParams(rclcpp::Node::SharedPtr node) {
     GET_PARAM(bool, "feature_extract_enable", preprocess_->FeatureEnabled(), false);
     GET_PARAM(bool, "runtime_pos_log_enable", runtime_pos_log_, true);
     GET_PARAM(bool, "mapping.extrinsic_est_en", extrinsic_est_en_, true);
-    GET_PARAM(bool, "pcd_save.pcd_save_en", pcd_save_en_, false);
     GET_PARAM(int, "pcd_save.interval", pcd_save_interval_, -1);
     
     std::vector<double> def_extrinT;
@@ -111,42 +83,10 @@ bool LaserMapping::LoadParams(rclcpp::Node::SharedPtr node) {
 
     #undef GET_PARAM
 
-    LOG(INFO) << "lidar_type " << lidar_type;
-    if (lidar_type == 1) {
-        preprocess_->SetLidarType(LidarType::AVIA);
-        LOG(INFO) << "Using AVIA Lidar (livox_ros_driver2::msg::CustomMsg)";
-    } else if (lidar_type == 2) {
-        preprocess_->SetLidarType(LidarType::VELO32);
-        LOG(INFO) << "Using Velodyne 32 Lidar";
-    } else if (lidar_type == 3) {
-        preprocess_->SetLidarType(LidarType::OUST64);
-        LOG(INFO) << "Using OUST 64 Lidar";
-    } else if (lidar_type == 4) {
-        preprocess_->SetLidarType(LidarType::HESAIxt32);
-        LOG(INFO) << "Using Hesai Pandar 32 Lidar";
-    } else if (lidar_type == 5) {
-        preprocess_->SetLidarType(LidarType::ROBOSENSE);
-        LOG(INFO) << "Using Robosense Lidar";
-    } else if (lidar_type == 6) {
-        preprocess_->SetLidarType(LidarType::LIVOX);
-        LOG(INFO) << "Using Livox Lidar (sensor_msgs::msg::PointCloud2)";
-    } else {
-        LOG(WARNING) << "unknown lidar_type";
-        return false;
-    }
+    preprocess_->SetLidarType(LidarType::AVIA);
+    LOG(INFO) << "Using AVIA Lidar (livox_ros_driver2::msg::CustomMsg)";
 
-    if (ivox_nearby_type == 0) {
-        ivox_options_.nearby_type_ = IVoxType::NearbyType::CENTER;
-    } else if (ivox_nearby_type == 6) {
-        ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY6;
-    } else if (ivox_nearby_type == 18) {
-        ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY18;
-    } else if (ivox_nearby_type == 26) {
-        ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY26;
-    } else {
-        LOG(WARNING) << "unknown ivox_nearby_type, use NEARBY18";
-        ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY18;
-    }
+    ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY18;
 
     path_.header.stamp = node_->now();
     path_.header.frame_id = tf_world_frame_;
@@ -161,108 +101,6 @@ bool LaserMapping::LoadParams(rclcpp::Node::SharedPtr node) {
     p_imu_->SetAccCov(common::V3D(acc_cov, acc_cov, acc_cov));
     p_imu_->SetGyrBiasCov(common::V3D(b_gyr_cov, b_gyr_cov, b_gyr_cov));
     p_imu_->SetAccBiasCov(common::V3D(b_acc_cov, b_acc_cov, b_acc_cov));
-    return true;
-}
-
-bool LaserMapping::LoadParamsFromYAML(const std::string &yaml_file) {
-    // get params from yaml
-    int lidar_type, ivox_nearby_type;
-    double gyr_cov, acc_cov, b_gyr_cov, b_acc_cov;
-    double filter_size_surf_min;
-    common::V3D lidar_T_wrt_IMU;
-    common::M3D lidar_R_wrt_IMU;
-
-    auto yaml = YAML::LoadFile(yaml_file);
-    try {
-        path_pub_en_ = yaml["publish"]["path_publish_en"].as<bool>();
-        scan_pub_en_ = yaml["publish"]["scan_publish_en"].as<bool>();
-        dense_pub_en_ = yaml["publish"]["dense_publish_en"].as<bool>();
-        scan_body_pub_en_ = yaml["publish"]["scan_bodyframe_pub_en"].as<bool>();
-        scan_effect_pub_en_ = yaml["publish"]["scan_effect_pub_en"].as<bool>();
-        tf_imu_frame_ = yaml["publish"]["tf_imu_frame"].as<std::string>("body");
-        tf_world_frame_ = yaml["publish"]["tf_world_frame"].as<std::string>("camera_init");
-        path_save_en_ = yaml["path_save_en"].as<bool>();
-
-        options::NUM_MAX_ITERATIONS = yaml["max_iteration"].as<int>();
-        options::ESTI_PLANE_THRESHOLD = yaml["esti_plane_threshold"].as<float>();
-        time_sync_en_ = yaml["common"]["time_sync_en"].as<bool>();
-
-        filter_size_surf_min = yaml["filter_size_surf"].as<float>();
-        filter_size_map_min_ = yaml["filter_size_map"].as<float>();
-        cube_len_ = yaml["cube_side_length"].as<int>();
-        det_range_ = yaml["mapping"]["det_range"].as<float>();
-        gyr_cov = yaml["mapping"]["gyr_cov"].as<float>();
-        acc_cov = yaml["mapping"]["acc_cov"].as<float>();
-        b_gyr_cov = yaml["mapping"]["b_gyr_cov"].as<float>();
-        b_acc_cov = yaml["mapping"]["b_acc_cov"].as<float>();
-        preprocess_->Blind() = yaml["preprocess"]["blind"].as<double>();
-        preprocess_->TimeScale() = yaml["preprocess"]["time_scale"].as<double>();
-        lidar_type = yaml["preprocess"]["lidar_type"].as<int>();
-        preprocess_->NumScans() = yaml["preprocess"]["scan_line"].as<int>();
-        preprocess_->PointFilterNum() = yaml["point_filter_num"].as<int>();
-        preprocess_->FeatureEnabled() = yaml["feature_extract_enable"].as<bool>();
-        extrinsic_est_en_ = yaml["mapping"]["extrinsic_est_en"].as<bool>();
-        pcd_save_en_ = yaml["pcd_save"]["pcd_save_en"].as<bool>();
-        pcd_save_interval_ = yaml["pcd_save"]["interval"].as<int>();
-        extrinT_ = yaml["mapping"]["extrinsic_T"].as<std::vector<double>>();
-        extrinR_ = yaml["mapping"]["extrinsic_R"].as<std::vector<double>>();
-
-        ivox_options_.resolution_ = yaml["ivox_grid_resolution"].as<float>();
-        ivox_nearby_type = yaml["ivox_nearby_type"].as<int>();
-    } catch (...) {
-        LOG(ERROR) << "bad conversion";
-        return false;
-    }
-
-    LOG(INFO) << "lidar_type " << lidar_type;
-    if (lidar_type == 1) {
-        preprocess_->SetLidarType(LidarType::AVIA);
-        LOG(INFO) << "Using AVIA Lidar (livox_ros_driver2::msg::CustomMsg)";
-    } else if (lidar_type == 2) {
-        preprocess_->SetLidarType(LidarType::VELO32);
-        LOG(INFO) << "Using Velodyne 32 Lidar";
-    } else if (lidar_type == 3) {
-        preprocess_->SetLidarType(LidarType::OUST64);
-        LOG(INFO) << "Using OUST 64 Lidar";
-    } else if (lidar_type == 4) {
-        preprocess_->SetLidarType(LidarType::HESAIxt32);
-        LOG(INFO) << "Using Hesai Pandar 32 Lidar";
-    } else if (lidar_type == 5) {
-        preprocess_->SetLidarType(LidarType::ROBOSENSE);
-        LOG(INFO) << "Using Robosense Lidar";
-    } else if (lidar_type == 6) {
-        preprocess_->SetLidarType(LidarType::LIVOX);
-        LOG(INFO) << "Using Livox Lidar (sensor_msgs::msg::PointCloud2)";
-    } else {
-        LOG(WARNING) << "unknown lidar_type";
-        return false;
-    }
-
-    if (ivox_nearby_type == 0) {
-        ivox_options_.nearby_type_ = IVoxType::NearbyType::CENTER;
-    } else if (ivox_nearby_type == 6) {
-        ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY6;
-    } else if (ivox_nearby_type == 18) {
-        ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY18;
-    } else if (ivox_nearby_type == 26) {
-        ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY26;
-    } else {
-        LOG(WARNING) << "unknown ivox_nearby_type, use NEARBY18";
-        ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY18;
-    }
-
-    voxel_scan_.setLeafSize(filter_size_surf_min, filter_size_surf_min, filter_size_surf_min);
-
-    lidar_T_wrt_IMU = common::VecFromArray<double>(extrinT_);
-    lidar_R_wrt_IMU = common::MatFromArray<double>(extrinR_);
-
-    p_imu_->SetExtrinsic(lidar_T_wrt_IMU, lidar_R_wrt_IMU);
-    p_imu_->SetGyrCov(common::V3D(gyr_cov, gyr_cov, gyr_cov));
-    p_imu_->SetAccCov(common::V3D(acc_cov, acc_cov, acc_cov));
-    p_imu_->SetGyrBiasCov(common::V3D(b_gyr_cov, b_gyr_cov, b_gyr_cov));
-    p_imu_->SetAccBiasCov(common::V3D(b_acc_cov, b_acc_cov, b_acc_cov));
-
-    run_in_offline_ = true;
     return true;
 }
 
@@ -274,26 +112,21 @@ void LaserMapping::SubAndPubToROS(rclcpp::Node::SharedPtr node) {
     node->declare_parameter<std::string>("common.imu_topic", "/livox/imu");
     node->get_parameter("common.imu_topic", imu_topic);
 
-    if (preprocess_->GetLidarType() == LidarType::AVIA) {
-        sub_pcl_livox_ = node->create_subscription<livox_ros_driver2::msg::CustomMsg>(
-            lidar_topic, 200000, [this](const livox_ros_driver2::msg::CustomMsg::ConstSharedPtr msg) { LivoxPCLCallBack(msg); });
-    } else {
-        sub_pcl_std_ = node->create_subscription<sensor_msgs::msg::PointCloud2>(
-            lidar_topic, 200000, [this](const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) { StandardPCLCallBack(msg); });
-    }
+    sub_pcl_livox_ = node->create_subscription<livox_ros_driver2::msg::CustomMsg>(
+        lidar_topic, 1000, [this](const livox_ros_driver2::msg::CustomMsg::ConstSharedPtr msg) { LivoxPCLCallBack(msg); });
 
     sub_imu_ = node->create_subscription<sensor_msgs::msg::Imu>(
-        imu_topic, 200000, [this](const sensor_msgs::msg::Imu::ConstSharedPtr msg) { IMUCallBack(msg); });
+        imu_topic, 1000, [this](const sensor_msgs::msg::Imu::ConstSharedPtr msg) { IMUCallBack(msg); });
 
     // ROS publisher init
     path_.header.stamp = node_->now();
     path_.header.frame_id = tf_world_frame_;
 
-    pub_laser_cloud_world_ = node->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 100000);
-    pub_laser_cloud_body_ = node->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_body", 100000);
+    pub_laser_cloud_world_ = node->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 100);
+    pub_laser_cloud_body_ = node->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_body", 100);
     pub_laser_cloud_effect_world_ = node->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_effect_world", 100000);
-    pub_odom_aft_mapped_ = node->create_publisher<nav_msgs::msg::Odometry>("/Odometry", 100000);
-    pub_path_ = node->create_publisher<nav_msgs::msg::Path>("/path", 100000);
+    pub_odom_aft_mapped_ = node->create_publisher<nav_msgs::msg::Odometry>("/Odometry", 100);
+    pub_path_ = node->create_publisher<nav_msgs::msg::Path>("/path", 100);
 }
 
 LaserMapping::LaserMapping() {
@@ -302,18 +135,18 @@ LaserMapping::LaserMapping() {
 }
 
 void LaserMapping::Run() {
-    if (!SyncPackages()) {
-        return;
-    }
 
-    /// IMU process, kf prediction, undistortion
+    if (!SyncPackages()) return;
+
+    // IMU process, kf prediction, undistortion
     p_imu_->Process(measures_, kf_, scan_undistort_);
+
     if (scan_undistort_->empty() || (scan_undistort_ == nullptr)) {
         LOG(WARNING) << "No point, skip this scan!";
         return;
     }
 
-    /// the first scan
+    // the first scan
     if (flg_first_scan_) {
         state_point_ = kf_.get_x();
         scan_down_world_->resize(scan_undistort_->size());
@@ -327,7 +160,6 @@ void LaserMapping::Run() {
     }
     flg_EKF_inited_ = (measures_.lidar_bag_time_ - first_lidar_time_) >= options::INIT_TIME;
 
-    /// downsample
     Timer::Evaluate(
         [&, this]() {
             voxel_scan_.setInputCloud(scan_undistort_);
@@ -340,6 +172,7 @@ void LaserMapping::Run() {
         LOG(WARNING) << "Too few points, skip this scan!" << scan_undistort_->size() << ", " << scan_down_body_->size();
         return;
     }
+
     scan_down_world_->resize(cur_pts);
     nearest_points_.resize(cur_pts);
     residuals_.resize(cur_pts, 0);
@@ -360,61 +193,17 @@ void LaserMapping::Run() {
         },
         "IEKF Solve and Update");
 
-    // update local map
     Timer::Evaluate([&, this]() { MapIncremental(); }, "    Incremental Mapping");
 
-    LOG(INFO) << "[ mapping ]: In num: " << scan_undistort_->points.size() << " downsamp " << cur_pts
-              << " Map grid num: " << ivox_->NumValidGrids() << " effect num : " << effect_feat_num_;
+    // LOG(INFO) << "[ mapping ]: In num: " << scan_undistort_->points.size() << " downsamp " << cur_pts
+    //           << " Map grid num: " << ivox_->NumValidGrids() << " effect num : " << effect_feat_num_;
 
-    // publish or save map pcd
-    if (run_in_offline_) {
-        if (pcd_save_en_) {
-            PublishFrameWorld();
-        }
-        if (path_save_en_) {
-            PublishPath(pub_path_);
-        }
-    } else {
-        if (pub_odom_aft_mapped_ != nullptr) {
-            PublishOdometry(pub_odom_aft_mapped_);
-        }
-        if (path_pub_en_ || path_save_en_) {
-            PublishPath(pub_path_);
-        }
-        if (scan_pub_en_ || pcd_save_en_) {
-            PublishFrameWorld();
-        }
-        if (scan_pub_en_ && scan_body_pub_en_) {
-            PublishFrameBody(pub_laser_cloud_body_);
-        }
-        if (scan_pub_en_ && scan_effect_pub_en_) {
-            PublishFrameEffectWorld(pub_laser_cloud_effect_world_);
-        }
-    }
+    PublishOdometry(pub_odom_aft_mapped_);
 
-    // Debug variables
-    frame_num_++;
-}
-
-void LaserMapping::StandardPCLCallBack(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
-    mtx_buffer_.lock();
-    Timer::Evaluate(
-        [&, this]() {
-            scan_count_++;
-            double msg_time = rclcpp::Time(msg->header.stamp).seconds();
-            if (msg_time < last_timestamp_lidar_) {
-                LOG(ERROR) << "lidar loop back, clear buffer";
-                lidar_buffer_.clear();
-            }
-
-            PointCloudType::Ptr ptr(new PointCloudType());
-            preprocess_->Process(msg, ptr);
-            lidar_buffer_.push_back(ptr);
-            time_buffer_.push_back(msg_time);
-            last_timestamp_lidar_ = msg_time;
-        },
-        "Preprocess (Standard)");
-    mtx_buffer_.unlock();
+    if (path_pub_en_) PublishPath(pub_path_);
+    if (scan_pub_en_) PublishFrameWorld();
+    if (scan_pub_en_ && scan_body_pub_en_) PublishFrameBody(pub_laser_cloud_body_);
+    if (scan_pub_en_ && scan_effect_pub_en_) PublishFrameEffectWorld(pub_laser_cloud_effect_world_);
 }
 
 void LaserMapping::LivoxPCLCallBack(const livox_ros_driver2::msg::CustomMsg::ConstSharedPtr msg) {
@@ -477,11 +266,9 @@ void LaserMapping::IMUCallBack(const sensor_msgs::msg::Imu::ConstSharedPtr msg_i
 }
 
 bool LaserMapping::SyncPackages() {
-    if (lidar_buffer_.empty() || imu_buffer_.empty()) {
-        return false;
-    }
 
-    /*** push a lidar scan ***/
+    if (lidar_buffer_.empty() || imu_buffer_.empty()) return false;
+
     if (!lidar_pushed_) {
         measures_.lidar_ = lidar_buffer_.front();
         measures_.lidar_bag_time_ = time_buffer_.front();
@@ -502,11 +289,8 @@ bool LaserMapping::SyncPackages() {
         lidar_pushed_ = true;
     }
 
-    if (last_timestamp_imu_ < lidar_end_time_) {
-        return false;
-    }
+    if (last_timestamp_imu_ < lidar_end_time_) return false;
 
-    /*** push imu_ data, and pop from imu_ buffer ***/
     double imu_time = rclcpp::Time(imu_buffer_.front()->header.stamp).seconds();
     measures_.imu_.clear();
     while ((!imu_buffer_.empty()) && (imu_time < lidar_end_time_)) {
@@ -522,10 +306,10 @@ bool LaserMapping::SyncPackages() {
     return true;
 }
 
-void LaserMapping::PrintState(const state_ikfom &s) {
-    LOG(INFO) << "state r: " << s.rot.coeffs().transpose() << ", t: " << s.pos.transpose()
-              << ", off r: " << s.offset_R_L_I.coeffs().transpose() << ", t: " << s.offset_T_L_I.transpose();
-}
+// void LaserMapping::PrintState(const state_ikfom &s) {
+//     LOG(INFO) << "state r: " << s.rot.coeffs().transpose() << ", t: " << s.pos.transpose()
+//               << ", off r: " << s.offset_R_L_I.coeffs().transpose() << ", t: " << s.offset_T_L_I.transpose();
+// }
 
 void LaserMapping::MapIncremental() {
     PointVector points_to_add;
@@ -541,10 +325,10 @@ void LaserMapping::MapIncremental() {
     }
 
     std::for_each(std::execution::unseq, index.begin(), index.end(), [&](const size_t &i) {
-        /* transform to world frame */
+        // transform to world frame 
         PointBodyToWorld(&(scan_down_body_->points[i]), &(scan_down_world_->points[i]));
 
-        /* decide if need add to map */
+        // decide if need add to map
         PointType &point_world = scan_down_world_->points[i];
         if (!nearest_points_[i].empty() && flg_EKF_inited_) {
             const PointVector &points_near = nearest_points_[i];
@@ -587,13 +371,6 @@ void LaserMapping::MapIncremental() {
         "    IVox Add Points");
 }
 
-/**
- * Lidar point cloud registration
- * will be called by the eskf custom observation model
- * compute point-to-plane residual here
- * @param s kf state
- * @param ekfom_data H matrix
- */
 void LaserMapping::ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data) {
     int cnt_pts = scan_down_body_->size();
 
@@ -607,19 +384,19 @@ void LaserMapping::ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double
             auto R_wl = (s.rot * s.offset_R_L_I).cast<float>();
             auto t_wl = (s.rot * s.offset_T_L_I + s.pos).cast<float>();
 
-            /** closest surface search and residual computation **/
+            // closest surface search and residual computation 
             std::for_each(std::execution::par_unseq, index.begin(), index.end(), [&](const size_t &i) {
                 PointType &point_body = scan_down_body_->points[i];
                 PointType &point_world = scan_down_world_->points[i];
 
-                /* transform to world frame */
+                // transform to world frame
                 common::V3F p_body = point_body.getVector3fMap();
                 point_world.getVector3fMap() = R_wl * p_body + t_wl;
                 point_world.intensity = point_body.intensity;
 
                 auto &points_near = nearest_points_[i];
                 if (ekfom_data.converge) {
-                    /** Find the closest surfaces in the map **/
+                    // Find the closest surfaces in the map 
                     points_near.clear();
                     ivox_->GetClosestPoint(point_world, points_near, options::NUM_MATCH_POINTS);
                     point_selected_surf_[i] = points_near.size() >= options::MIN_NUM_MATCH_POINTS;
@@ -670,7 +447,7 @@ void LaserMapping::ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double
 
     Timer::Evaluate(
         [&, this]() {
-            /*** Computation of Measurement Jacobian matrix H and measurements vector ***/
+            // Computation of Measurement Jacobian matrix H and measurements vector 
             ekfom_data.h_x = Eigen::MatrixXd::Zero(effect_feat_num_, 12);  // 23
             ekfom_data.h.resize(effect_feat_num_);
 
@@ -685,10 +462,10 @@ void LaserMapping::ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double
                 common::V3F point_this = off_R * point_this_be + off_t;
                 common::M3F point_crossmat = SKEW_SYM_MATRIX(point_this);
 
-                /*** get the normal vector of closest surface/corner ***/
+                // get the normal vector of closest surface/corner 
                 common::V3F norm_vec = corr_norm_[i].head<3>();
 
-                /*** calculate the Measurement Jacobian matrix H ***/
+                // calculate the Measurement Jacobian matrix H 
                 common::V3F C(Rt * norm_vec);
                 common::V3F A(point_crossmat * C);
 
@@ -701,7 +478,7 @@ void LaserMapping::ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double
                         0.0, 0.0, 0.0, 0.0, 0.0;
                 }
 
-                /*** Measurement: distance to the closest surface/corner ***/
+                // Measurement: distance to the closest surface/corner 
                 ekfom_data.h(i) = -corr_pts_[i][3];
             });
         },
@@ -709,18 +486,6 @@ void LaserMapping::ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double
 }
 
 /////////////////////////////////////  debug save / show /////////////////////////////////////////////////////
-
-void LaserMapping::PublishPath(const rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pub_path) {
-    SetPosestamp(msg_body_pose_);
-    msg_body_pose_.header.stamp = rclcpp::Time(static_cast<int64_t>(lidar_end_time_ * 1e9));
-    msg_body_pose_.header.frame_id = tf_world_frame_;
-
-    /*** if path is too large, the rvis will crash ***/
-    path_.poses.push_back(msg_body_pose_);
-    if (run_in_offline_ == false) {
-        pub_path->publish(path_);
-    }
-}
 
 void LaserMapping::PublishOdometry(const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr &pub_odom_aft_mapped) {
     odom_aft_mapped_.header.frame_id = tf_world_frame_;
@@ -754,10 +519,19 @@ void LaserMapping::PublishOdometry(const rclcpp::Publisher<nav_msgs::msg::Odomet
     tf_broadcaster_->sendTransform(transformStamped);
 }
 
+void LaserMapping::PublishPath(const rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pub_path) {
+    SetPosestamp(msg_body_pose_);
+    msg_body_pose_.header.stamp = rclcpp::Time(static_cast<int64_t>(lidar_end_time_ * 1e9));
+    msg_body_pose_.header.frame_id = tf_world_frame_;
+
+    // if path is too large, the rvis will crash
+    path_.poses.push_back(msg_body_pose_);
+    
+    pub_path->publish(path_);
+}
+
 void LaserMapping::PublishFrameWorld() {
-    if (!(run_in_offline_ == false && scan_pub_en_) && !pcd_save_en_) {
-        return;
-    }
+    if (!scan_pub_en_) return;
 
     PointCloudType::Ptr laserCloudWorld;
     if (dense_pub_en_) {
@@ -771,33 +545,13 @@ void LaserMapping::PublishFrameWorld() {
         laserCloudWorld = scan_down_world_;
     }
 
-    if (run_in_offline_ == false && scan_pub_en_) {
+    if (scan_pub_en_) {
         sensor_msgs::msg::PointCloud2 laserCloudmsg;
         pcl::toROSMsg(*laserCloudWorld, laserCloudmsg);
         laserCloudmsg.header.stamp = rclcpp::Time(static_cast<int64_t>(lidar_end_time_ * 1e9));
         laserCloudmsg.header.frame_id = tf_world_frame_;
         pub_laser_cloud_world_->publish(laserCloudmsg);
         publish_count_ -= options::PUBFRAME_PERIOD;
-    }
-
-    /**************** save map ****************/
-    /* 1. make sure you have enough memories
-    /* 2. noted that pcd save will influence the real-time performences **/
-    if (pcd_save_en_) {
-        *pcl_wait_save_ += *laserCloudWorld;
-
-        static int scan_wait_num = 0;
-        scan_wait_num++;
-        if (pcl_wait_save_->size() > 0 && pcd_save_interval_ > 0 && scan_wait_num >= pcd_save_interval_) {
-            pcd_index_++;
-            std::string all_points_dir(std::string(std::string(ROOT_DIR) + "PCD/scans_") + std::to_string(pcd_index_) +
-                                       std::string(".pcd"));
-            pcl::PCDWriter pcd_writer;
-            LOG(INFO) << "current scan saved to /PCD/" << all_points_dir;
-            pcd_writer.writeBinary(all_points_dir, *pcl_wait_save_);
-            pcl_wait_save_->clear();
-            scan_wait_num = 0;
-        }
     }
 }
 
@@ -824,6 +578,7 @@ void LaserMapping::PublishFrameEffectWorld(const rclcpp::Publisher<sensor_msgs::
     for (int i = 0; i < size; i++) {
         PointBodyToWorld(corr_pts_[i].head<3>(), &laser_cloud->points[i]);
     }
+
     sensor_msgs::msg::PointCloud2 laserCloudmsg;
     pcl::toROSMsg(*laser_cloud, laserCloudmsg);
     laserCloudmsg.header.stamp = rclcpp::Time(static_cast<int64_t>(lidar_end_time_ * 1e9));
@@ -832,25 +587,8 @@ void LaserMapping::PublishFrameEffectWorld(const rclcpp::Publisher<sensor_msgs::
     publish_count_ -= options::PUBFRAME_PERIOD;
 }
 
-void LaserMapping::Savetrajectory(const std::string &traj_file) {
-    std::ofstream ofs;
-    ofs.open(traj_file, std::ios::out);
-    if (!ofs.is_open()) {
-        LOG(ERROR) << "Failed to open traj_file: " << traj_file;
-        return;
-    }
+/////////////////////////////////////  private method /////////////////////////////////////////////////////
 
-    ofs << "#timestamp x y z q_x q_y q_z q_w" << std::endl;
-    for (const auto &p : path_.poses) {
-        ofs << std::fixed << std::setprecision(6) << rclcpp::Time(p.header.stamp).seconds() << " " << std::setprecision(15)
-            << p.pose.position.x << " " << p.pose.position.y << " " << p.pose.position.z << " " << p.pose.orientation.x
-            << " " << p.pose.orientation.y << " " << p.pose.orientation.z << " " << p.pose.orientation.w << std::endl;
-    }
-
-    ofs.close();
-}
-
-///////////////////////////  private method /////////////////////////////////////////////////////////////////////
 template <typename T>
 void LaserMapping::SetPosestamp(T &out) {
     out.pose.position.x = state_point_.pos(0);
@@ -892,20 +630,5 @@ void LaserMapping::PointBodyLidarToIMU(PointType const *const pi, PointType *con
     po->y = p_body_imu(1);
     po->z = p_body_imu(2);
     po->intensity = pi->intensity;
-}
-
-void LaserMapping::Finish() {
-    /**************** save map ****************/
-    /* 1. make sure you have enough memories
-    /* 2. pcd save will largely influence the real-time performences **/
-    if (pcl_wait_save_->size() > 0 && pcd_save_en_) {
-        std::string file_name = std::string("scans.pcd");
-        std::string all_points_dir(std::string(std::string(ROOT_DIR) + "PCD/") + file_name);
-        pcl::PCDWriter pcd_writer;
-        LOG(INFO) << "current scan saved to /PCD/" << file_name;
-        pcd_writer.writeBinary(all_points_dir, *pcl_wait_save_);
-    }
-
-    LOG(INFO) << "finish done";
 }
 }  // namespace faster_lio
