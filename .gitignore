@@ -1,5 +1,9 @@
 .vscode/
 
+install/
+
+log/
+
 # Prerequisites
 *.d
 
