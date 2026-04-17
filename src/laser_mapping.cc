@@ -12,16 +12,14 @@
 namespace faster_lio {
 
 bool LaserMapping::InitROS(rclcpp::Node::SharedPtr node) {
-    node_ = node; // Save the node pointer for later use (e.g., getting current time)
+    node_ = node;
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
 
     LoadParams(node);
     SubAndPubToROS(node);
 
-    // localmap init (after LoadParams)
     ivox_ = std::make_shared<IVoxType>(ivox_options_);
 
-    // esekf init
     std::vector<double> epsi(23, 0.001);
     kf_.init_dyn_share(
         get_f, df_dx, df_dw,
@@ -32,7 +30,7 @@ bool LaserMapping::InitROS(rclcpp::Node::SharedPtr node) {
 }
 
 bool LaserMapping::LoadParams(rclcpp::Node::SharedPtr node) {
-    
+
     int lidar_type, ivox_nearby_type;
     double gyr_cov, acc_cov, b_gyr_cov, b_acc_cov;
     double filter_size_surf_min;
@@ -49,11 +47,11 @@ bool LaserMapping::LoadParams(rclcpp::Node::SharedPtr node) {
     GET_PARAM(bool, "publish.scan_bodyframe_pub_en", scan_body_pub_en_, true);
     GET_PARAM(bool, "publish.scan_effect_pub_en", scan_effect_pub_en_, false);
     GET_PARAM(std::string, "publish.tf_imu_frame", tf_imu_frame_, "body");
-    GET_PARAM(std::string, "publish.tf_world_frame", tf_world_frame_, "camera_init");
+    GET_PARAM(std::string, "publish.tf_world_frame", tf_world_frame_, "world");
+    GET_PARAM(std::string, "map_file_path", map_file_path_, "");
 
     GET_PARAM(int, "max_iteration", options::NUM_MAX_ITERATIONS, 4);
     GET_PARAM(float, "esti_plane_threshold", options::ESTI_PLANE_THRESHOLD, 0.1);
-    GET_PARAM(std::string, "map_file_path", map_file_path_, "");
     GET_PARAM(bool, "common.time_sync_en", time_sync_en_, false);
     GET_PARAM(double, "filter_size_surf", filter_size_surf_min, 0.5);
     GET_PARAM(double, "filter_size_map", filter_size_map_min_, 0.0);
@@ -72,26 +70,19 @@ bool LaserMapping::LoadParams(rclcpp::Node::SharedPtr node) {
     GET_PARAM(bool, "runtime_pos_log_enable", runtime_pos_log_, true);
     GET_PARAM(bool, "mapping.extrinsic_est_en", extrinsic_est_en_, true);
     GET_PARAM(int, "pcd_save.interval", pcd_save_interval_, -1);
+    GET_PARAM(float, "ivox_grid_resolution", ivox_options_.resolution_, 0.2);
+    GET_PARAM(int, "ivox_nearby_type", ivox_nearby_type, 18);
     
     std::vector<double> def_extrinT;
     std::vector<double> def_extrinR;
     GET_PARAM(std::vector<double>, "mapping.extrinsic_T", extrinT_, def_extrinT);
     GET_PARAM(std::vector<double>, "mapping.extrinsic_R", extrinR_, def_extrinR);
-
-    GET_PARAM(float, "ivox_grid_resolution", ivox_options_.resolution_, 0.2);
-    GET_PARAM(int, "ivox_nearby_type", ivox_nearby_type, 18);
-
     #undef GET_PARAM
-
-    preprocess_->SetLidarType(LidarType::AVIA);
-    LOG(INFO) << "Using AVIA Lidar (livox_ros_driver2::msg::CustomMsg)";
-
-    ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY18;
-
-    path_.header.stamp = node_->now();
-    path_.header.frame_id = tf_world_frame_;
-
+    
+    preprocess_->SetLidarType(LidarType::Mid360);
     voxel_scan_.setLeafSize(filter_size_surf_min, filter_size_surf_min, filter_size_surf_min);
+    
+    ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY18;
 
     lidar_T_wrt_IMU = common::VecFromArray<double>(extrinT_);
     lidar_R_wrt_IMU = common::MatFromArray<double>(extrinR_);
@@ -105,7 +96,7 @@ bool LaserMapping::LoadParams(rclcpp::Node::SharedPtr node) {
 }
 
 void LaserMapping::SubAndPubToROS(rclcpp::Node::SharedPtr node) {
-    // ROS subscribe initialization
+    
     std::string lidar_topic, imu_topic;
     node->declare_parameter<std::string>("common.lid_topic", "/livox/lidar");
     node->get_parameter("common.lid_topic", lidar_topic);
@@ -118,15 +109,14 @@ void LaserMapping::SubAndPubToROS(rclcpp::Node::SharedPtr node) {
     sub_imu_ = node->create_subscription<sensor_msgs::msg::Imu>(
         imu_topic, 1000, [this](const sensor_msgs::msg::Imu::ConstSharedPtr msg) { IMUCallBack(msg); });
 
-    // ROS publisher init
+    pub_laser_cloud_world_ = node->create_publisher<sensor_msgs::msg::PointCloud2>("lidar_perception/cloud_registered", 100);
+    pub_laser_cloud_body_ = node->create_publisher<sensor_msgs::msg::PointCloud2>("lidar_perception/cloud_registered_body", 100);
+    pub_laser_cloud_effect_world_ = node->create_publisher<sensor_msgs::msg::PointCloud2>("lidar_perception/cloud_registered_effect_world", 100);
+    pub_odom_aft_mapped_ = node->create_publisher<nav_msgs::msg::Odometry>("lidar_perception/Odometry", 100);
+
     path_.header.stamp = node_->now();
     path_.header.frame_id = tf_world_frame_;
-
-    pub_laser_cloud_world_ = node->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 100);
-    pub_laser_cloud_body_ = node->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_body", 100);
-    pub_laser_cloud_effect_world_ = node->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_effect_world", 100000);
-    pub_odom_aft_mapped_ = node->create_publisher<nav_msgs::msg::Odometry>("/Odometry", 100);
-    pub_path_ = node->create_publisher<nav_msgs::msg::Path>("/path", 100);
+    pub_path_ = node->create_publisher<nav_msgs::msg::Path>("lidar_perception/path", 100);
 }
 
 LaserMapping::LaserMapping() {
@@ -135,18 +125,15 @@ LaserMapping::LaserMapping() {
 }
 
 void LaserMapping::Run() {
-
     if (!SyncPackages()) return;
 
-    // IMU process, kf prediction, undistortion
     p_imu_->Process(measures_, kf_, scan_undistort_);
 
     if (scan_undistort_->empty() || (scan_undistort_ == nullptr)) {
-        LOG(WARNING) << "No point, skip this scan!";
+        LOG(WARNING) << "No effective points, skip this scan!";
         return;
     }
 
-    // the first scan
     if (flg_first_scan_) {
         state_point_ = kf_.get_x();
         scan_down_world_->resize(scan_undistort_->size());
@@ -158,14 +145,15 @@ void LaserMapping::Run() {
         flg_first_scan_ = false;
         return;
     }
-    flg_EKF_inited_ = (measures_.lidar_bag_time_ - first_lidar_time_) >= options::INIT_TIME;
 
+    flg_EKF_inited_ = (measures_.lidar_bag_time_ - first_lidar_time_) >= options::INIT_TIME;
+    
     Timer::Evaluate(
         [&, this]() {
             voxel_scan_.setInputCloud(scan_undistort_);
             voxel_scan_.filter(*scan_down_body_);
         },
-        "Downsample PointCloud");
+        "Downsample the point cloud using the official PCL library");
 
     int cur_pts = scan_down_body_->size();
     if (cur_pts < 5) {
@@ -182,18 +170,15 @@ void LaserMapping::Run() {
     // ICP and iterated Kalman filter update
     Timer::Evaluate(
         [&, this]() {
-            // iterated state estimation
             double solve_H_time = 0;
-            // update the observation model, will call nn and point-to-plane residual computation
             kf_.update_iterated_dyn_share_modified(options::LASER_POINT_COV, solve_H_time);
-            // save the state
             state_point_ = kf_.get_x();
             euler_cur_ = SO3ToEuler(state_point_.rot);
             pos_lidar_ = state_point_.pos + state_point_.rot * state_point_.offset_T_L_I;
         },
         "IEKF Solve and Update");
 
-    Timer::Evaluate([&, this]() { MapIncremental(); }, "    Incremental Mapping");
+    Timer::Evaluate([&, this]() { MapIncremental(); }, "Incremental Mapping");
 
     // LOG(INFO) << "[ mapping ]: In num: " << scan_undistort_->points.size() << " downsamp " << cur_pts
     //           << " Map grid num: " << ivox_->NumValidGrids() << " effect num : " << effect_feat_num_;
@@ -207,29 +192,25 @@ void LaserMapping::Run() {
 }
 
 void LaserMapping::LivoxPCLCallBack(const livox_ros_driver2::msg::CustomMsg::ConstSharedPtr msg) {
+    // You can consider std::lock_guard<std::mutex> lock(mtx_buffer_)
     mtx_buffer_.lock();
+
     Timer::Evaluate(
         [&, this]() {
-            scan_count_++;
             double msg_time = rclcpp::Time(msg->header.stamp).seconds();
-            if (msg_time < last_timestamp_lidar_) {
-                LOG(WARNING) << "lidar loop back, clear buffer";
-                lidar_buffer_.clear();
-            }
+            if (msg_time < last_timestamp_lidar_) lidar_buffer_.clear();
+            // LOG(WARNING) << "Lidar loop back, clear buffer!";
 
             last_timestamp_lidar_ = msg_time;
-
-            if (!time_sync_en_ && abs(last_timestamp_imu_ - last_timestamp_lidar_) > 10.0 && !imu_buffer_.empty() &&
-                !lidar_buffer_.empty()) {
-                LOG(INFO) << "IMU and LiDAR not Synced, IMU time: " << last_timestamp_imu_
-                          << ", lidar header time: " << last_timestamp_lidar_;
+            if (!time_sync_en_ && (last_timestamp_lidar_ - last_timestamp_imu_) > 0.1) {
+                LOG(INFO) << "IMU and Lidar not synced, IMU time: " << last_timestamp_imu_ << ", Lidar time: " << last_timestamp_lidar_;
             }
 
-            if (time_sync_en_ && !timediff_set_flg_ && abs(last_timestamp_lidar_ - last_timestamp_imu_) > 1 &&
-                !imu_buffer_.empty()) {
+            // The source code set abs(last_timestamp_lidar_ - last_timestamp_imu_) > 1.0
+            if (time_sync_en_ && !timediff_set_flg_ && (last_timestamp_lidar_ - last_timestamp_imu_) > 0.1 && !lidar_buffer_.empty()) {
+                timediff_lidar_wrt_imu_ = last_timestamp_lidar_ - last_timestamp_imu_;
                 timediff_set_flg_ = true;
-                timediff_lidar_wrt_imu_ = last_timestamp_lidar_ + 0.1 - last_timestamp_imu_;
-                LOG(INFO) << "Self sync IMU and LiDAR, time diff is " << timediff_lidar_wrt_imu_;
+                LOG(INFO) << "Self sync IMU and Lidar, time diff is " << timediff_lidar_wrt_imu_;
             }
 
             PointCloudType::Ptr ptr(new PointCloudType());
@@ -237,43 +218,37 @@ void LaserMapping::LivoxPCLCallBack(const livox_ros_driver2::msg::CustomMsg::Con
             lidar_buffer_.emplace_back(ptr);
             time_buffer_.emplace_back(last_timestamp_lidar_);
         },
-        "Preprocess (Livox)");
+        "Preprocess (LivoxPCLCallBack)");
 
     mtx_buffer_.unlock();
 }
 
-void LaserMapping::IMUCallBack(const sensor_msgs::msg::Imu::ConstSharedPtr msg_in) {
-    publish_count_++;
-    sensor_msgs::msg::Imu::SharedPtr msg(new sensor_msgs::msg::Imu(*msg_in));
-
-    double msg_time = rclcpp::Time(msg_in->header.stamp).seconds();
-
-    if (abs(timediff_lidar_wrt_imu_) > 0.1 && time_sync_en_) {
-        msg->header.stamp = rclcpp::Time(static_cast<int64_t>((timediff_lidar_wrt_imu_ + msg_time) * 1e9));
-    }
-
-    double timestamp = rclcpp::Time(msg->header.stamp).seconds();
-
+void LaserMapping::IMUCallBack(const sensor_msgs::msg::Imu::ConstSharedPtr msg_raw) {
+    sensor_msgs::msg::Imu::SharedPtr msg(new sensor_msgs::msg::Imu(*msg_raw));
     mtx_buffer_.lock();
-    if (timestamp < last_timestamp_imu_) {
-        LOG(WARNING) << "imu loop back, clear buffer";
-        imu_buffer_.clear();
-    }
 
-    last_timestamp_imu_ = timestamp;
+    double msg_time = rclcpp::Time(msg_raw->header.stamp).seconds();
+    if (msg_time < last_timestamp_imu_) imu_buffer_.clear();
+    // LOG(WARNING) << "IMU loop back, clear buffer!";
+
+    // This is where time synchronization really comes into play
+    if (time_sync_en_ && timediff_lidar_wrt_imu_ > 0.0) {
+        msg->header.stamp = rclcpp::Time(static_cast<int64_t>((msg_time + timediff_lidar_wrt_imu_) * 1e9));
+    }
+    
+    last_timestamp_imu_ = msg_time;
     imu_buffer_.emplace_back(msg);
     mtx_buffer_.unlock();
 }
 
 bool LaserMapping::SyncPackages() {
-
     if (lidar_buffer_.empty() || imu_buffer_.empty()) return false;
 
     if (!lidar_pushed_) {
         measures_.lidar_ = lidar_buffer_.front();
         measures_.lidar_bag_time_ = time_buffer_.front();
 
-        if (measures_.lidar_->points.size() <= 1) {
+        if (measures_.lidar_->points.size() <= 1000) {
             LOG(WARNING) << "Too few input point cloud!";
             lidar_end_time_ = measures_.lidar_bag_time_ + lidar_mean_scantime_;
         } else if (measures_.lidar_->points.back().curvature / double(1000) < 0.5 * lidar_mean_scantime_) {
@@ -281,8 +256,8 @@ bool LaserMapping::SyncPackages() {
         } else {
             scan_num_++;
             lidar_end_time_ = measures_.lidar_bag_time_ + measures_.lidar_->points.back().curvature / double(1000);
-            lidar_mean_scantime_ +=
-                (measures_.lidar_->points.back().curvature / double(1000) - lidar_mean_scantime_) / scan_num_;
+            // Updates the average scan time incrementally
+            lidar_mean_scantime_ += (measures_.lidar_->points.back().curvature / double(1000) - lidar_mean_scantime_) / scan_num_;
         }
 
         measures_.lidar_end_time_ = lidar_end_time_;
@@ -292,8 +267,10 @@ bool LaserMapping::SyncPackages() {
     if (last_timestamp_imu_ < lidar_end_time_) return false;
 
     double imu_time = rclcpp::Time(imu_buffer_.front()->header.stamp).seconds();
+    
     measures_.imu_.clear();
     while ((!imu_buffer_.empty()) && (imu_time < lidar_end_time_)) {
+        // Update imu_time because imu_buffer_.pop_front()
         imu_time = rclcpp::Time(imu_buffer_.front()->header.stamp).seconds();
         if (imu_time > lidar_end_time_) break;
         measures_.imu_.push_back(imu_buffer_.front());
@@ -305,11 +282,6 @@ bool LaserMapping::SyncPackages() {
     lidar_pushed_ = false;
     return true;
 }
-
-// void LaserMapping::PrintState(const state_ikfom &s) {
-//     LOG(INFO) << "state r: " << s.rot.coeffs().transpose() << ", t: " << s.pos.transpose()
-//               << ", off r: " << s.offset_R_L_I.coeffs().transpose() << ", t: " << s.offset_T_L_I.transpose();
-// }
 
 void LaserMapping::MapIncremental() {
     PointVector points_to_add;
@@ -325,17 +297,14 @@ void LaserMapping::MapIncremental() {
     }
 
     std::for_each(std::execution::unseq, index.begin(), index.end(), [&](const size_t &i) {
-        // transform to world frame 
         PointBodyToWorld(&(scan_down_body_->points[i]), &(scan_down_world_->points[i]));
 
-        // decide if need add to map
         PointType &point_world = scan_down_world_->points[i];
+
         if (!nearest_points_[i].empty() && flg_EKF_inited_) {
             const PointVector &points_near = nearest_points_[i];
-
             Eigen::Vector3f center =
                 ((point_world.getVector3fMap() / filter_size_map_min_).array().floor() + 0.5) * filter_size_map_min_;
-
             Eigen::Vector3f dis_2_center = points_near[0].getVector3fMap() - center;
 
             if (fabs(dis_2_center.x()) > 0.5 * filter_size_map_min_ &&
@@ -355,9 +324,8 @@ void LaserMapping::MapIncremental() {
                     }
                 }
             }
-            if (need_add) {
-                points_to_add.emplace_back(point_world);
-            }
+            if (need_add) points_to_add.emplace_back(point_world);
+
         } else {
             points_to_add.emplace_back(point_world);
         }
@@ -368,7 +336,7 @@ void LaserMapping::MapIncremental() {
             ivox_->AddPoints(points_to_add);
             ivox_->AddPoints(point_no_need_downsample);
         },
-        "    IVox Add Points");
+        "Incrementally maintain the local map");
 }
 
 void LaserMapping::ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data) {
@@ -551,7 +519,6 @@ void LaserMapping::PublishFrameWorld() {
         laserCloudmsg.header.stamp = rclcpp::Time(static_cast<int64_t>(lidar_end_time_ * 1e9));
         laserCloudmsg.header.frame_id = tf_world_frame_;
         pub_laser_cloud_world_->publish(laserCloudmsg);
-        publish_count_ -= options::PUBFRAME_PERIOD;
     }
 }
 
@@ -568,7 +535,6 @@ void LaserMapping::PublishFrameBody(const rclcpp::Publisher<sensor_msgs::msg::Po
     laserCloudmsg.header.stamp = rclcpp::Time(static_cast<int64_t>(lidar_end_time_ * 1e9));
     laserCloudmsg.header.frame_id = "body";
     pub_laser_cloud_body->publish(laserCloudmsg);
-    publish_count_ -= options::PUBFRAME_PERIOD;
 }
 
 void LaserMapping::PublishFrameEffectWorld(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr &pub_laser_cloud_effect_world) {
@@ -584,7 +550,6 @@ void LaserMapping::PublishFrameEffectWorld(const rclcpp::Publisher<sensor_msgs::
     laserCloudmsg.header.stamp = rclcpp::Time(static_cast<int64_t>(lidar_end_time_ * 1e9));
     laserCloudmsg.header.frame_id = tf_world_frame_;
     pub_laser_cloud_effect_world->publish(laserCloudmsg);
-    publish_count_ -= options::PUBFRAME_PERIOD;
 }
 
 /////////////////////////////////////  private method /////////////////////////////////////////////////////

@@ -1,37 +1,3 @@
-/*
- *  Copyright (c) 2019--2023, The University of Hong Kong
- *  All rights reserved.
- *
- *  Author: Dongjiao HE <hdj65822@connect.hku.hk>
- *
- *  Redistribution and use in source and binary forms, with or without
- *  modification, are permitted provided that the following conditions
- *  are met:
- *
- *   * Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *   * Redistributions in binary form must reproduce the above
- *     copyright notice, this list of conditions and the following
- *     disclaimer in the documentation and/or other materials provided
- *     with the distribution.
- *   * Neither the name of the Universitaet Bremen nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- *  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- *  COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- *  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- *  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- *  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- */
-
 #ifndef ESEKFOM_EKF_HPP
 #define ESEKFOM_EKF_HPP
 
@@ -50,8 +16,6 @@
 #include "../mtk/types/SOn.hpp"
 #include "../mtk/types/vect.hpp"
 #include "util.hpp"
-
-//#define USE_sparse
 
 namespace esekfom {
 
@@ -303,16 +267,7 @@ class esekf {
             }
             MTK::SO3<scalar_type> res;
             res.w() = MTK::exp<scalar_type, 3>(res.vec(), seg_SO3, scalar_type(1 / 2));
-#ifdef USE_sparse
-            res_temp_SO3 = res.toRotationMatrix();
-            for (int i = 0; i < 3; i++) {
-                for (int j = 0; j < 3; j++) {
-                    f_x_1.coeffRef(idx + i, idx + j) = res_temp_SO3(i, j);
-                }
-            }
-#else
             F_x1.template block<3, 3>(idx, idx) = res.toRotationMatrix();
-#endif
             res_temp_SO3 = MTK::A_matrix(seg_SO3);
             for (int i = 0; i < n; i++) {
                 f_x_final.template block<3, 1>(idx, i) = res_temp_SO3 * (f_x_.template block<3, 1>(dim, i));
@@ -338,16 +293,7 @@ class esekf {
             Eigen::Matrix<scalar_type, 3, 2> Mx;
             x_.S2_Nx_yy(Nx, idx);
             x_before.S2_Mx(Mx, vec, idx);
-#ifdef USE_sparse
-            res_temp_S2_ = Nx * res.toRotationMatrix() * Mx;
-            for (int i = 0; i < 2; i++) {
-                for (int j = 0; j < 2; j++) {
-                    f_x_1.coeffRef(idx + i, idx + j) = res_temp_S2_(i, j);
-                }
-            }
-#else
             F_x1.template block<2, 2>(idx, idx) = Nx * res.toRotationMatrix() * Mx;
-#endif
 
             Eigen::Matrix<scalar_type, 3, 3> x_before_hat;
             x_before.S2_hat(x_before_hat, idx);
@@ -361,16 +307,8 @@ class esekf {
             }
         }
 
-#ifdef USE_sparse
-        f_x_1.makeCompressed();
-        spMt f_x2 = f_x_final.sparseView();
-        spMt f_w1 = f_w_final.sparseView();
-        spMt xp = f_x_1 + f_x2 * dt;
-        P_ = xp * P_ * xp.transpose() + (f_w1 * dt) * Q * (f_w1 * dt).transpose();
-#else
         F_x1 += f_x_final * dt;
         P_ = (F_x1)*P_ * (F_x1).transpose() + (dt * f_w_final) * Q * (dt * f_w_final).transpose();
-#endif
     }
 
     // iterated error state EKF update for measurement as a manifold.
@@ -389,14 +327,8 @@ class esekf {
             vectorized_state dx, dx_new;
             x_.boxminus(dx, x_propagated);
             dx_new = dx;
-#ifdef USE_sparse
-            spMt h_x_ = h_x(x_, valid).sparseView();
-            spMt h_v_ = h_v(x_, valid).sparseView();
-            spMt R_ = R.sparseView();
-#else
             Matrix<scalar_type, l, n> h_x_ = h_x(x_, valid);
             Matrix<scalar_type, l, Eigen::Dynamic> h_v_ = h_v(x_, valid);
-#endif
             if (!valid) {
                 continue;
             }
@@ -447,29 +379,10 @@ class esekf {
 
             Matrix<scalar_type, n, l> K_;
             if (n > l) {
-#ifdef USE_sparse
-                Matrix<scalar_type, l, l> K_temp = h_x_ * P_ * h_x_.transpose();
-                spMt R_temp = h_v_ * R_ * h_v_.transpose();
-                K_temp += R_temp;
-                K_ = P_ * h_x_.transpose() * K_temp.inverse();
-#else
                 K_ = P_ * h_x_.transpose() * (h_x_ * P_ * h_x_.transpose() + h_v_ * R * h_v_.transpose()).inverse();
-#endif
             } else {
-#ifdef USE_sparse
-                measurementnoisecovariance b = measurementnoisecovariance::Identity();
-                Eigen::SparseQR<Eigen::SparseMatrix<scalar_type>, Eigen::COLAMDOrdering<int>> solver;
-                solver.compute(R_);
-                measurementnoisecovariance R_in_temp = solver.solve(b);
-                spMt R_in = R_in_temp.sparseView();
-                spMt K_temp = h_x_.transpose() * R_in * h_x_;
-                cov_ P_temp = P_.inverse();
-                P_temp += K_temp;
-                K_ = P_temp.inverse() * h_x_.transpose() * R_in;
-#else
                 measurementnoisecovariance R_in = (h_v_ * R * h_v_.transpose()).inverse();
                 K_ = (h_x_.transpose() * R_in * h_x_ + P_.inverse()).inverse() * h_x_.transpose() * R_in;
-#endif
             }
             Matrix<scalar_type, l, 1> innovation;
             z.boxminus(innovation, h(x_, valid));
@@ -584,14 +497,8 @@ class esekf {
             measurement h = h_share(x_, _share);
             measurement z = _share.z;
             measurementnoisecovariance R = _share.R;
-#ifdef USE_sparse
-            spMt h_x_ = _share.h_x.sparseView();
-            spMt h_v_ = _share.h_v.sparseView();
-            spMt R_ = _share.R.sparseView();
-#else
             Matrix<scalar_type, l, n> h_x_ = _share.h_x;
             Matrix<scalar_type, l, Eigen::Dynamic> h_v_ = _share.h_v;
-#endif
             if (!_share.valid) {
                 continue;
             }
@@ -642,29 +549,10 @@ class esekf {
 
             Matrix<scalar_type, n, l> K_;
             if (n > l) {
-#ifdef USE_sparse
-                Matrix<scalar_type, l, l> K_temp = h_x_ * P_ * h_x_.transpose();
-                spMt R_temp = h_v_ * R_ * h_v_.transpose();
-                K_temp += R_temp;
-                K_ = P_ * h_x_.transpose() * K_temp.inverse();
-#else
                 K_ = P_ * h_x_.transpose() * (h_x_ * P_ * h_x_.transpose() + h_v_ * R * h_v_.transpose()).inverse();
-#endif
             } else {
-#ifdef USE_sparse
-                measurementnoisecovariance b = measurementnoisecovariance::Identity();
-                Eigen::SparseQR<Eigen::SparseMatrix<scalar_type>, Eigen::COLAMDOrdering<int>> solver;
-                solver.compute(R_);
-                measurementnoisecovariance R_in_temp = solver.solve(b);
-                spMt R_in = R_in_temp.sparseView();
-                spMt K_temp = h_x_.transpose() * R_in * h_x_;
-                cov_ P_temp = P_.inverse();
-                P_temp += K_temp;
-                K_ = P_temp.inverse() * h_x_.transpose() * R_in;
-#else
                 measurementnoisecovariance R_in = (h_v_ * R * h_v_.transpose()).inverse();
                 K_ = (h_x_.transpose() * R_in * h_x_ + P_.inverse()).inverse() * h_x_.transpose() * R_in;
-#endif
             }
             Matrix<scalar_type, l, 1> innovation;
             z.boxminus(innovation, h);
@@ -767,14 +655,8 @@ class esekf {
         int dof_Measurement_noise = R.rows();
         for (int i = -1; i < maximum_iter; i++) {
             valid = true;
-#ifdef USE_sparse
-            spMt h_x_ = h_x_dyn(x_, valid).sparseView();
-            spMt h_v_ = h_v_dyn(x_, valid).sparseView();
-            spMt R_ = R.sparseView();
-#else
             Matrix<scalar_type, Eigen::Dynamic, n> h_x_ = h_x_dyn(x_, valid);
             Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> h_v_ = h_v_dyn(x_, valid);
-#endif
             Matrix<scalar_type, Eigen::Dynamic, 1> h_ = h_dyn(x_, valid);
             dof_Measurement = h_.rows();
             vectorized_state dx, dx_new;
@@ -829,32 +711,11 @@ class esekf {
 
             Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> K_;
             if (n > dof_Measurement) {
-#ifdef USE_sparse
-                Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> K_temp = h_x_ * P_ * h_x_.transpose();
-                spMt R_temp = h_v_ * R_ * h_v_.transpose();
-                K_temp += R_temp;
-                K_ = P_ * h_x_.transpose() * K_temp.inverse();
-#else
                 K_ = P_ * h_x_.transpose() * (h_x_ * P_ * h_x_.transpose() + h_v_ * R * h_v_.transpose()).inverse();
-#endif
             } else {
-#ifdef USE_sparse
-                Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> b =
-                    Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic>::Identity(dof_Measurement_noise,
-                                                                                         dof_Measurement_noise);
-                Eigen::SparseQR<Eigen::SparseMatrix<scalar_type>, Eigen::COLAMDOrdering<int>> solver;
-                solver.compute(R_);
-                Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> R_in_temp = solver.solve(b);
-                spMt R_in = R_in_temp.sparseView();
-                spMt K_temp = h_x_.transpose() * R_in * h_x_;
-                cov_ P_temp = P_.inverse();
-                P_temp += K_temp;
-                K_ = P_temp.inverse() * h_x_.transpose() * R_in;
-#else
                 Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> R_in =
                     (h_v_ * R * h_v_.transpose()).inverse();
                 K_ = (h_x_.transpose() * R_in * h_x_ + P_.inverse()).inverse() * h_x_.transpose() * R_in;
-#endif
             }
             cov K_x = K_ * h_x_;
             Matrix<scalar_type, n, 1> dx_ = K_ * (z - h_) + (K_x - Matrix<scalar_type, n, n>::Identity()) * dx_new;
@@ -959,15 +820,9 @@ class esekf {
             // Matrix<scalar_type, Eigen::Dynamic, 1> h = h_dyn_share (x_,  dyn_share);
             Matrix<scalar_type, Eigen::Dynamic, 1> z = dyn_share.z;
             Matrix<scalar_type, Eigen::Dynamic, 1> h = dyn_share.h;
-#ifdef USE_sparse
-            spMt h_x = dyn_share.h_x.sparseView();
-            spMt h_v = dyn_share.h_v.sparseView();
-            spMt R_ = dyn_share.R.sparseView();
-#else
             Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> R = dyn_share.R;
             Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> h_x = dyn_share.h_x;
             Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> h_v = dyn_share.h_v;
-#endif
             dof_Measurement = h_x.rows();
             dof_Measurement_noise = dyn_share.R.rows();
             vectorized_state dx, dx_new;
@@ -1022,31 +877,10 @@ class esekf {
 
             Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> K_;
             if (n > dof_Measurement) {
-#ifdef USE_sparse
-                Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> K_temp = h_x * P_ * h_x.transpose();
-                spMt R_temp = h_v * R_ * h_v.transpose();
-                K_temp += R_temp;
-                K_ = P_ * h_x.transpose() * K_temp.inverse();
-#else
                 K_ = P_ * h_x.transpose() * (h_x * P_ * h_x.transpose() + h_v * R * h_v.transpose()).inverse();
-#endif
             } else {
-#ifdef USE_sparse
-                Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> b =
-                    Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic>::Identity(dof_Measurement_noise,
-                                                                                         dof_Measurement_noise);
-                Eigen::SparseQR<Eigen::SparseMatrix<scalar_type>, Eigen::COLAMDOrdering<int>> solver;
-                solver.compute(R_);
-                Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> R_in_temp = solver.solve(b);
-                spMt R_in = R_in_temp.sparseView();
-                spMt K_temp = h_x.transpose() * R_in * h_x;
-                cov_ P_temp = P_.inverse();
-                P_temp += K_temp;
-                K_ = P_temp.inverse() * h_x.transpose() * R_in;
-#else
                 Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> R_in = (h_v * R * h_v.transpose()).inverse();
                 K_ = (h_x.transpose() * R_in * h_x + P_.inverse()).inverse() * h_x.transpose() * R_in;
-#endif
             }
 
             cov K_x = K_ * h_x;
@@ -1149,14 +983,8 @@ class esekf {
         int dof_Measurement_noise;
         for (int i = -1; i < maximum_iter; i++) {
             valid = true;
-#ifdef USE_sparse
-            spMt h_x_ = h_x_dyn(x_, valid).sparseView();
-            spMt h_v_ = h_v_dyn(x_, valid).sparseView();
-            spMt R_ = R.sparseView();
-#else
             Matrix<scalar_type, Eigen::Dynamic, n> h_x_ = h_x_dyn(x_, valid);
             Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> h_v_ = h_v_dyn(x_, valid);
-#endif
             measurement_runtime h_ = h_runtime(x_, valid);
             dof_Measurement = measurement_runtime::DOF;
             dof_Measurement_noise = R.rows();
@@ -1212,32 +1040,11 @@ class esekf {
 
             Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> K_;
             if (n > dof_Measurement) {
-#ifdef USE_sparse
-                Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> K_temp = h_x_ * P_ * h_x_.transpose();
-                spMt R_temp = h_v_ * R_ * h_v_.transpose();
-                K_temp += R_temp;
-                K_ = P_ * h_x_.transpose() * K_temp.inverse();
-#else
                 K_ = P_ * h_x_.transpose() * (h_x_ * P_ * h_x_.transpose() + h_v_ * R * h_v_.transpose()).inverse();
-#endif
             } else {
-#ifdef USE_sparse
-                Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> b =
-                    Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic>::Identity(dof_Measurement_noise,
-                                                                                         dof_Measurement_noise);
-                Eigen::SparseQR<Eigen::SparseMatrix<scalar_type>, Eigen::COLAMDOrdering<int>> solver;
-                solver.compute(R_);
-                Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> R_in_temp = solver.solve(b);
-                spMt R_in = R_in_temp.sparseView();
-                spMt K_temp = h_x_.transpose() * R_in * h_x_;
-                cov_ P_temp = P_.inverse();
-                P_temp += K_temp;
-                K_ = P_temp.inverse() * h_x_.transpose() * R_in;
-#else
                 Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> R_in =
                     (h_v_ * R * h_v_.transpose()).inverse();
                 K_ = (h_x_.transpose() * R_in * h_x_ + P_.inverse()).inverse() * h_x_.transpose() * R_in;
-#endif
             }
             cov K_x = K_ * h_x_;
             Eigen::Matrix<scalar_type, measurement_runtime::DOF, 1> innovation;
@@ -1345,15 +1152,9 @@ class esekf {
             dyn_share.valid = true;
             measurement_runtime h_ = h(x_, dyn_share);
             // measurement_runtime z = dyn_share.z;
-#ifdef USE_sparse
-            spMt h_x = dyn_share.h_x.sparseView();
-            spMt h_v = dyn_share.h_v.sparseView();
-            spMt R_ = dyn_share.R.sparseView();
-#else
             Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> R = dyn_share.R;
             Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> h_x = dyn_share.h_x;
             Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> h_v = dyn_share.h_v;
-#endif
             dof_Measurement = measurement_runtime::DOF;
             dof_Measurement_noise = dyn_share.R.rows();
             vectorized_state dx, dx_new;
@@ -1408,31 +1209,10 @@ class esekf {
 
             Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> K_;
             if (n > dof_Measurement) {
-#ifdef USE_sparse
-                Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> K_temp = h_x * P_ * h_x.transpose();
-                spMt R_temp = h_v * R_ * h_v.transpose();
-                K_temp += R_temp;
-                K_ = P_ * h_x.transpose() * K_temp.inverse();
-#else
                 K_ = P_ * h_x.transpose() * (h_x * P_ * h_x.transpose() + h_v * R * h_v.transpose()).inverse();
-#endif
             } else {
-#ifdef USE_sparse
-                Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> b =
-                    Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic>::Identity(dof_Measurement_noise,
-                                                                                         dof_Measurement_noise);
-                Eigen::SparseQR<Eigen::SparseMatrix<scalar_type>, Eigen::COLAMDOrdering<int>> solver;
-                solver.compute(R_);
-                Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> R_in_temp = solver.solve(b);
-                spMt R_in = R_in_temp.sparseView();
-                spMt K_temp = h_x.transpose() * R_in * h_x;
-                cov_ P_temp = P_.inverse();
-                P_temp += K_temp;
-                K_ = P_temp.inverse() * h_x.transpose() * R_in;
-#else
                 Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> R_in = (h_v * R * h_v.transpose()).inverse();
                 K_ = (h_x.transpose() * R_in * h_x + P_.inverse()).inverse() * h_x.transpose() * R_in;
-#endif
             }
             cov K_x = K_ * h_x;
             Eigen::Matrix<scalar_type, measurement_runtime::DOF, 1> innovation;
@@ -1543,13 +1323,8 @@ class esekf {
             if (!dyn_share.valid) {
                 continue;
             }
-
-// Matrix<scalar_type, Eigen::Dynamic, 1> h = h_dyn_share(x_, dyn_share);
-#ifdef USE_sparse
-            spMt h_x_ = dyn_share.h_x.sparseView();
-#else
+            // Matrix<scalar_type, Eigen::Dynamic, 1> h = h_dyn_share(x_, dyn_share);
             Eigen::Matrix<scalar_type, Eigen::Dynamic, 12> h_x_ = dyn_share.h_x;
-#endif
             // double solve_start = omp_get_wtime();
             dof_Measurement = h_x_.rows();
             vectorized_state dx;
@@ -1650,38 +1425,6 @@ class esekf {
                 //	K_= P_ * h_x.transpose() * (h_x * P_ * h_x.transpose() + h_v * R * h_v.transpose()).inverse();
                 //#endif
             } else {
-#ifdef USE_sparse
-                // Eigen::Matrix<scalar_type, n, n> b = Eigen::Matrix<scalar_type, n, n>::Identity();
-                // Eigen::SparseQR<Eigen::SparseMatrix<scalar_type>, Eigen::COLAMDOrdering<int>> solver;
-                spMt A = h_x_.transpose() * h_x_;
-                cov_ P_temp = (P_ / R).inverse();
-                P_temp.template block<12, 12>(0, 0) += A;
-                P_temp = P_temp.inverse();
-                /*
-                Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> h_x_cur = Eigen::Matrix<scalar_type,
-                Eigen::Dynamic, Eigen::Dynamic>::Zero(dof_Measurement, n); h_x_cur.col(0) = h_x_.col(0); h_x_cur.col(1)
-                = h_x_.col(1); h_x_cur.col(2) = h_x_.col(2); h_x_cur.col(3) = h_x_.col(3); h_x_cur.col(4) = h_x_.col(4);
-                h_x_cur.col(5) = h_x_.col(5);
-                h_x_cur.col(6) = h_x_.col(6);
-                h_x_cur.col(7) = h_x_.col(7);
-                h_x_cur.col(8) = h_x_.col(8);
-                h_x_cur.col(9) = h_x_.col(9);
-                h_x_cur.col(10) = h_x_.col(10);
-                h_x_cur.col(11) = h_x_.col(11);
-                */
-                K_ = P_temp.template block<n, 12>(0, 0) * h_x_.transpose();
-                K_x = cov_::Zero();
-                K_x.template block<n, 12>(0, 0) = P_inv.template block<n, 12>(0, 0) * HTH;
-                /*
-                solver.compute(R_);
-                Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> R_in_temp = solver.solve(b);
-                spMt R_in =R_in_temp.sparseView();
-                spMt K_temp = h_x.transpose() * R_in * h_x;
-                cov_ P_temp = P_.inverse();
-                P_temp += K_temp;
-                K_ = P_temp.inverse() * h_x.transpose() * R_in;
-                */
-#else
                 cov P_temp = (P_ / R).inverse();
                 // Eigen::Matrix<scalar_type, 12, Eigen::Dynamic> h_T = h_x_.transpose();
                 Eigen::Matrix<scalar_type, 12, 12> HTH = h_x_.transpose() * h_x_;
@@ -1712,7 +1455,6 @@ class esekf {
                 K_x.setZero();  // = cov_::Zero();
                 K_x.template block<n, 12>(0, 0) = P_inv.template block<n, 12>(0, 0) * HTH;
                 // K_= (h_x_.transpose() * h_x_ + (P_/R).inverse()).inverse()*h_x_.transpose();
-#endif
             }
 
             // K_x = K_ * h_x_;
@@ -1895,7 +1637,6 @@ class esekf {
    public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
-
 }  // namespace esekfom
 
-#endif  //  ESEKFOM_EKF_HPP
+#endif

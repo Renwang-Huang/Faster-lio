@@ -8,9 +8,6 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <tf2_ros/transform_broadcaster.h>
-
-#include <livox_ros_driver2/msg/custom_msg.hpp> 
-
 #include <pcl/filters/voxel_grid.h>
 #include <condition_variable>
 #include <thread>
@@ -21,6 +18,8 @@
 #include "ivox3d/ivox3d.h"
 #include "options.h"
 #include "pointcloud_preprocess.h"
+
+#include <livox_ros_driver2/msg/custom_msg.hpp>
 
 namespace faster_lio {
 
@@ -38,23 +37,18 @@ class LaserMapping {
         scan_down_world_ = nullptr;
         LOG(INFO) << "laser mapping deconstruct";
     }
-
-    /// init with ros2
+    
+    void Run();
     bool InitROS(rclcpp::Node::SharedPtr node);
 
-    void Run();
-
-    // callbacks of lidar and imu
     void LivoxPCLCallBack(const livox_ros_driver2::msg::CustomMsg::ConstSharedPtr msg);
-    void IMUCallBack(const sensor_msgs::msg::Imu::ConstSharedPtr msg_in);
-
-    // sync lidar with imu
+    void IMUCallBack(const sensor_msgs::msg::Imu::ConstSharedPtr msg_raw);
     bool SyncPackages();
 
     /// interface of mtk, customized obseravtion model
     void ObsModel(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data);
 
-    ////////////////////////////// debug save / show ////////////////////////////////////////////////////////////////
+    ////////////////////////////// debug save / show //////////////////////////////
     void PublishPath(const rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pub_path);
     void PublishOdometry(const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr &pub_odom_aft_mapped);
     void PublishFrameWorld();
@@ -65,22 +59,18 @@ class LaserMapping {
     template <typename T>
     void SetPosestamp(T &out);
 
+    bool LoadParams(rclcpp::Node::SharedPtr node);
+    void SubAndPubToROS(rclcpp::Node::SharedPtr node);
+    void MapIncremental();
+
     void PointBodyToWorld(PointType const *pi, PointType *const po);
     void PointBodyToWorld(const common::V3F &pi, PointType *const po);
     void PointBodyLidarToIMU(PointType const *const pi, PointType *const po);
 
-    void MapIncremental();
-
-    void SubAndPubToROS(rclcpp::Node::SharedPtr node);
-
-    bool LoadParams(rclcpp::Node::SharedPtr node);
-
    private:
-    // ROS 2 Core Modules
     rclcpp::Node::SharedPtr node_;
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
-    // modules
     IVoxType::Options ivox_options_;
     std::shared_ptr<IVoxType> ivox_ = nullptr;                    // localmap in ivox
     std::shared_ptr<PointCloudPreprocess> preprocess_ = nullptr;  // point cloud preprocess
@@ -92,7 +82,6 @@ class LaserMapping {
     double filter_size_map_min_ = 0;
     bool localmap_initialized_ = false;
 
-    /// params
     std::vector<double> extrinT_{3, 0.0};  // lidar-imu translation
     std::vector<double> extrinR_{9, 0.0};  // lidar-imu rotation
     std::string map_file_path_;
@@ -109,7 +98,6 @@ class LaserMapping {
     std::vector<char> point_selected_surf_;           // selected points
     common::VV4F plane_coef_;                         // plane coeffs
 
-    /// ros2 pub and sub stuffs
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_pcl_std_;
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr sub_pcl_livox_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
@@ -126,22 +114,19 @@ class LaserMapping {
     std::mutex mtx_buffer_;
     std::deque<double> time_buffer_;
     std::deque<PointCloudType::Ptr> lidar_buffer_;
-    std::deque<sensor_msgs::msg::Imu::SharedPtr> imu_buffer_; // 注意这里变成了 SharedPtr
+    std::deque<sensor_msgs::msg::Imu::SharedPtr> imu_buffer_;
     
     nav_msgs::msg::Odometry odom_aft_mapped_;
-
-    /// options
+    
+    bool lidar_pushed_ = false;
     bool time_sync_en_ = false;
     double timediff_lidar_wrt_imu_ = 0.0;
-    double last_timestamp_lidar_ = 0;
-    double lidar_end_time_ = 0;
+    double last_timestamp_lidar_ = -1.0;
+    double lidar_end_time_ = 0.0;
     double last_timestamp_imu_ = -1.0;
     double first_lidar_time_ = 0.0;
-    bool lidar_pushed_ = false;
 
-    /// statistics and flags ///
-    int scan_count_ = 0;
-    int publish_count_ = 0;
+    // statistics and flags
     bool flg_first_scan_ = true;
     bool flg_EKF_inited_ = false;
     int pcd_index_ = 0;
@@ -150,7 +135,7 @@ class LaserMapping {
     bool timediff_set_flg_ = false;
     int effect_feat_num_ = 0;
 
-    ///////////////////////// EKF inputs and output ///////////////////////////////////////////////////////
+    /////////////////////////  EKF inputs and output /////////////////////////
     common::MeasureGroup measures_;                    // sync IMU and lidar scan
     esekfom::esekf<state_ikfom, 12, input_ikfom> kf_;  // esekf
     state_ikfom state_point_;                          // ekf current state
@@ -158,7 +143,7 @@ class LaserMapping {
     common::V3D euler_cur_ = common::V3D::Zero();      // rotation in euler angles
     bool extrinsic_est_en_ = true;
 
-    /////////////////////////  debug show / save /////////////////////////////////////////////////////////
+    /////////////////////////  debug show / save /////////////////////////
     bool run_in_offline_ = false;
     bool path_pub_en_ = true;
     bool scan_pub_en_ = false;
@@ -170,11 +155,10 @@ class LaserMapping {
     int pcd_save_interval_ = -1;
     std::string dataset_;
 
-    PointCloudType::Ptr pcl_wait_save_{new PointCloudType()};  // debug save
+    PointCloudType::Ptr pcl_wait_save_{new PointCloudType()}; 
     nav_msgs::msg::Path path_;
     geometry_msgs::msg::PoseStamped msg_body_pose_;
 };
-
 }  // namespace faster_lio
 
 #endif  // FASTER_LIO_LASER_MAPPING_H

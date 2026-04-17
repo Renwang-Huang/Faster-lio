@@ -16,12 +16,10 @@
 #include "utils.h"
 
 namespace faster_lio {
-
 constexpr int MAX_INI_COUNT = 20;
 
 bool time_list(const PointType &x, const PointType &y) { return (x.curvature < y.curvature); };
 
-/// IMU Process and undistortion
 class ImuProcess {
    public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -111,8 +109,7 @@ void ImuProcess::SetGyrBiasCov(const common::V3D &b_g) { cov_bias_gyr_ = b_g; }
 
 void ImuProcess::SetAccBiasCov(const common::V3D &b_a) { cov_bias_acc_ = b_a; }
 
-void ImuProcess::IMUInit(const common::MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state,
-                         int &N) {
+void ImuProcess::IMUInit(const common::MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state, int &N) {
     common::V3D cur_acc, cur_gyr;
 
     if (b_first_frame_) {
@@ -277,9 +274,7 @@ void ImuProcess::UndistortPcl(const common::MeasureGroup &meas, esekfom::esekf<s
 
 void ImuProcess::Process(const common::MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state,
                          PointCloudType::Ptr cur_pcl_un_) {
-    if (meas.imu_.empty()) {
-        return;
-    }
+    if (meas.imu_.empty()) return;
 
     CHECK(meas.lidar_ != nullptr) << "meas.lidar_ is nullptr!";
 
@@ -289,19 +284,19 @@ void ImuProcess::Process(const common::MeasureGroup &meas, esekfom::esekf<state_
         last_imu_ = meas.imu_.back();
 
         state_ikfom imu_state = kf_state.get_x();
+
         if (init_iter_num_ > MAX_INI_COUNT) {
             cov_acc_ *= pow(common::G_m_s2 / mean_acc_.norm(), 2);
             imu_need_init_ = false;
-
             cov_acc_ = cov_acc_scale_;
             cov_gyr_ = cov_gyr_scale_;
-            LOG(INFO) << "IMU Initial Done";
+            LOG(INFO) << "IMU Initial Done!";
             fout_imu_.open(common::DEBUG_FILE_DIR("imu_.txt"), std::ios::out);
         }
         return;
     }
 
-    Timer::Evaluate([&, this]() { UndistortPcl(meas, kf_state, *cur_pcl_un_); }, "Undistort Pcl");
+    Timer::Evaluate([&, this]() { UndistortPcl(meas, kf_state, *cur_pcl_un_); }, "Undistort PointCloud");
 }
 }  
 

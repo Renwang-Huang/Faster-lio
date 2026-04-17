@@ -92,7 +92,6 @@ class Timer {
         if (records_.find(func_name) == records_.end()) {
             return 0.0;
         }
-
         auto r = records_[func_name];
         return std::accumulate(r.time_usage_in_ms_.begin(), r.time_usage_in_ms_.end(), 0.0) /
                double(r.time_usage_in_ms_.size());
@@ -104,7 +103,6 @@ class Timer {
    private:
     static std::map<std::string, TimerRecord> records_;
 };
-
 }  // namespace faster_lio
 
 #endif  // FASTER_LIO_UTILS_H
