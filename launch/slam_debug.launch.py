@@ -9,7 +9,7 @@ from launch.conditions import IfCondition
 def generate_launch_description():
     faster_lio_dir = get_package_share_directory('faster_lio')
     
-    config_path = os.path.join(faster_lio_dir, 'config', 'mid360.yaml')
+    config_path = os.path.join(faster_lio_dir, 'config', 'test.yaml')
     rviz_config_path = os.path.join(faster_lio_dir, 'config', 'rviz', 'faster_lio.rviz')
 
     rviz_arg = DeclareLaunchArgument(
@@ -41,3 +41,4 @@ def generate_launch_description():
         laser_mapping_node,
         rviz_node
     ])
+    

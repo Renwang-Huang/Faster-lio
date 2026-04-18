@@ -92,15 +92,8 @@ class esekf {
     typedef Eigen::Matrix<scalar_type, measurement_noise_dof, measurement_noise_dof> measurementnoisecovariance;
     typedef Eigen::Matrix<scalar_type, Eigen::Dynamic, Eigen::Dynamic> measurementnoisecovariance_dyn;
 
-    esekf(const state &x = state(), const cov &P = cov::Identity()) : x_(x), P_(P) {
-#ifdef USE_sparse
-        SparseMatrix<scalar_type> ref(n, n);
-        ref.setIdentity();
-        l_ = ref;
-        f_x_2 = ref;
-        f_x_1 = ref;
-#endif
-    };
+    // esekf(const state &x = state(), const cov &P = cov::Identity()) : x_(x), P_(P) {};
+    explicit esekf(const state &x = state(), const cov &P = cov::Identity()) : x_(x), P_(P) {}
 
     // receive system-specific models and their differentions.
     // for measurement as a manifold.
@@ -1575,6 +1568,9 @@ class esekf {
         }
     }
 
+    const state &get_x() const { return x_; }
+    const cov &get_P() const { return P_; }
+
     void change_x(state &input_state) {
         x_ = input_state;
         if ((!x_.vect_state.size()) && (!x_.SO3_state.size()) && (!x_.S2_state.size())) {
@@ -1585,9 +1581,6 @@ class esekf {
     }
 
     void change_P(cov &input_cov) { P_ = input_cov; }
-
-    const state &get_x() const { return x_; }
-    const cov &get_P() const { return P_; }
 
    private:
     state x_;

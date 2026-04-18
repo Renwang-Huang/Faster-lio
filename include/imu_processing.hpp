@@ -16,7 +16,7 @@
 #include "utils.h"
 
 namespace faster_lio {
-constexpr int MAX_INI_COUNT = 20;
+constexpr int MAX_INI_COUNT = 60;
 
 bool time_list(const PointType &x, const PointType &y) { return (x.curvature < y.curvature); };
 
@@ -55,12 +55,14 @@ class ImuProcess {
     std::deque<sensor_msgs::msg::Imu::SharedPtr> v_imu_;   
     std::vector<common::Pose6D> IMUpose_;
     std::vector<common::M3D> v_rot_pcl_;
+
     common::M3D Lidar_R_wrt_IMU_;
     common::V3D Lidar_T_wrt_IMU_;
     common::V3D mean_acc_;
     common::V3D mean_gyr_;
     common::V3D angvel_last_;
     common::V3D acc_s_last_;
+    
     double last_lidar_end_time_ = 0;
     int init_iter_num_ = 1;
     bool b_first_frame_ = true;
@@ -114,12 +116,11 @@ void ImuProcess::IMUInit(const common::MeasureGroup &meas, esekfom::esekf<state_
 
     if (b_first_frame_) {
         Reset();
-        N = 1;
-        b_first_frame_ = false;
         const auto &imu_acc = meas.imu_.front()->linear_acceleration;
         const auto &gyr_acc = meas.imu_.front()->angular_velocity;
         mean_acc_ << imu_acc.x, imu_acc.y, imu_acc.z;
         mean_gyr_ << gyr_acc.x, gyr_acc.y, gyr_acc.z;
+        b_first_frame_ = false;
     }
 
     for (const auto &imu : meas.imu_) {
@@ -131,16 +132,16 @@ void ImuProcess::IMUInit(const common::MeasureGroup &meas, esekfom::esekf<state_
         mean_acc_ += (cur_acc - mean_acc_) / N;
         mean_gyr_ += (cur_gyr - mean_gyr_) / N;
 
-        cov_acc_ =
-            cov_acc_ * (N - 1.0) / N + (cur_acc - mean_acc_).cwiseProduct(cur_acc - mean_acc_) * (N - 1.0) / (N * N);
-        cov_gyr_ =
-            cov_gyr_ * (N - 1.0) / N + (cur_gyr - mean_gyr_).cwiseProduct(cur_gyr - mean_gyr_) * (N - 1.0) / (N * N);
+        // cov_acc_ =
+        //     cov_acc_ * (N - 1.0) / N + (cur_acc - mean_acc_).cwiseProduct(cur_acc - mean_acc_) * (N - 1.0) / (N * N);
+        // cov_gyr_ =
+        //     cov_gyr_ * (N - 1.0) / N + (cur_gyr - mean_gyr_).cwiseProduct(cur_gyr - mean_gyr_) * (N - 1.0) / (N * N);
 
         N++;
     }
+
     state_ikfom init_state = kf_state.get_x();
     init_state.grav = S2(-mean_acc_ / mean_acc_.norm() * common::G_m_s2);
-
     init_state.bg = mean_gyr_;
     init_state.offset_T_L_I = Lidar_T_wrt_IMU_;
     init_state.offset_R_L_I = Lidar_R_wrt_IMU_;
@@ -154,6 +155,7 @@ void ImuProcess::IMUInit(const common::MeasureGroup &meas, esekfom::esekf<state_
     init_P(18, 18) = init_P(19, 19) = init_P(20, 20) = 0.001;
     init_P(21, 21) = init_P(22, 22) = 0.00001;
     kf_state.change_P(init_P);
+
     last_imu_ = meas.imu_.back();
 }
 
@@ -275,23 +277,18 @@ void ImuProcess::UndistortPcl(const common::MeasureGroup &meas, esekfom::esekf<s
 void ImuProcess::Process(const common::MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state,
                          PointCloudType::Ptr cur_pcl_un_) {
     if (meas.imu_.empty()) return;
-
     CHECK(meas.lidar_ != nullptr) << "meas.lidar_ is nullptr!";
 
     if (imu_need_init_) {
         IMUInit(meas, kf_state, init_iter_num_);
-        imu_need_init_ = true;
-        last_imu_ = meas.imu_.back();
-
-        state_ikfom imu_state = kf_state.get_x();
 
         if (init_iter_num_ > MAX_INI_COUNT) {
-            cov_acc_ *= pow(common::G_m_s2 / mean_acc_.norm(), 2);
-            imu_need_init_ = false;
+            // cov_acc_ *= pow(common::G_m_s2 / mean_acc_.norm(), 2);
             cov_acc_ = cov_acc_scale_;
             cov_gyr_ = cov_gyr_scale_;
             LOG(INFO) << "IMU Initial Done!";
-            fout_imu_.open(common::DEBUG_FILE_DIR("imu_.txt"), std::ios::out);
+            // fout_imu_.open(common::DEBUG_FILE_DIR("imu_.txt"), std::ios::out);
+            imu_need_init_ = false;
         }
         return;
     }
